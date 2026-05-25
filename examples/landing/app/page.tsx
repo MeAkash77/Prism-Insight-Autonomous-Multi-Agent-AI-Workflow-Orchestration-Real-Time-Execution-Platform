@@ -224,11 +224,11 @@ python demo.py AAPL`
             </h1>
           </div>
 
-          {/* Tagline with typewriter */}
+          {/* Tagline with typewriter - removed "Korean" */}
           <div className="h-16 md:h-12 mb-8">
             <p className="text-xl md:text-2xl font-mono text-zinc-400">
               <TypewriterText
-                text="AI-powered Korean & US stock analysis with automated trading"
+                text="AI-powered US stock analysis with automated trading"
                 delay={40}
               />
             </p>
