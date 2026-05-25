@@ -208,57 +208,57 @@ Return the translations in the same numbered format.""",
         # Static mapping table
         STATIC_MAPPINGS = {
             # Sectors (industry groups)
-            "자동차/완성차": "Automotive/Complete Vehicles",
-            "반도체": "Semiconductor",
-            "실전투자": "Live Trading",
-            "IT/소프트웨어": "IT/Software",
-            "바이오/제약": "Bio/Pharma",
-            "화학": "Chemical",
-            "금융": "Finance",
-            "유통": "Retail",
-            "건설": "Construction",
-            "철강/금속": "Steel/Metal",
-            "전기전자": "Electronics",
-            "기계": "Machinery",
-            "운송": "Transportation",
-            "서비스": "Service",
-            "미디어/엔터": "Media/Entertainment",
-            "제지/포장재": "Paper/Packaging",
-            "섬유/의류": "Textile/Apparel",
-            "식품/음료": "Food/Beverage",
-            "에너지": "Energy",
-            "통신": "Telecom",
-            "기타": "Others",
+            "Automotive/Complete Vehicles": "Automotive/Complete Vehicles",
+            "Semiconductor": "Semiconductor",
+            "Live Trading": "Live Trading",
+            "IT/Software": "IT/Software",
+            "Bio/Pharma": "Bio/Pharma",
+            "Chemical": "Chemical",
+            "Finance": "Finance",
+            "Retail": "Retail",
+            "Construction": "Construction",
+            "Steel/Metal": "Steel/Metal",
+            "Electronics": "Electronics",
+            "Machinery": "Machinery",
+            "Transportation": "Transportation",
+            "Service": "Service",
+            "Media/Entertainment": "Media/Entertainment",
+            "Paper/Packaging": "Paper/Packaging",
+            "Textile/Apparel": "Textile/Apparel",
+            "Food/Beverage": "Food/Beverage",
+            "Energy": "Energy",
+            "Telecom": "Telecom",
+            "Others": "Others",
 
             # Investment period
-            "단기": "Short-term",
-            "중기": "Mid-term",
-            "장기": "Long-term",
-            "해당없음": "N/A",
+            "Short-term": "Short-term",
+            "Mid-term": "Mid-term",
+            "Long-term": "Long-term",
+            "N/A": "N/A",
 
             # Decision types
-            "매수": "Buy",
-            "진입": "Entry",
-            "매도": "Sell",
-            "보류": "Hold",
-            "관망": "Watch",
+            "Buy": "Buy",
+            "Entry": "Entry",
+            "Sell": "Sell",
+            "Hold": "Hold",
+            "Watch": "Watch",
 
             # Market conditions
-            "횡보": "Sideways",
-            "상승": "Uptrend",
-            "하락": "Downtrend",
-            "변동성 확대": "High Volatility",
-            "안정": "Stable",
-            "과매수": "Overbought",
-            "과매도": "Oversold",
+            "Sideways": "Sideways",
+            "Uptrend": "Uptrend",
+            "Downtrend": "Downtrend",
+            "High Volatility": "High Volatility",
+            "Stable": "Stable",
+            "Overbought": "Overbought",
+            "Oversold": "Oversold",
 
             # Technical trends (for holding_decisions)
-            "상승 - 강": "Uptrend - Strong",
-            "상승 - 약": "Uptrend - Weak",
-            "하락 - 강": "Downtrend - Strong",
-            "하락 - 약": "Downtrend - Weak",
-            "횡보 - 강": "Sideways - Strong",
-            "횡보 - 약": "Sideways - Weak",
+            "Uptrend - Strong": "Uptrend - Strong",
+            "Uptrend - Weak": "Uptrend - Weak",
+            "Downtrend - Strong": "Downtrend - Strong",
+            "Downtrend - Weak": "Downtrend - Weak",
+            "Sideways - Strong": "Sideways - Strong",
+            "Sideways - Weak": "Sideways - Weak",
         }
 
         def replace_in_dict(obj, parent=None, parent_key=None):
@@ -407,28 +407,28 @@ def create_translation_mapping_file():
     mappings = {
         "ko": {
             "sector": {
-                "자동차/완성차": "자동차/완성차",
-                "반도체": "반도체",
-                "실전투자": "실전투자",
+                "Automotive/Complete Vehicles": "자동차/완성차",
+                "Semiconductor": "반도체",
+                "Live Trading": "실전투자",
                 # ... more
             },
             "period": {
-                "단기": "단기",
-                "중기": "중기",
-                "장기": "장기"
+                "Short-term": "단기",
+                "Mid-term": "중기",
+                "Long-term": "장기"
             }
         },
         "en": {
             "sector": {
-                "자동차/완성차": "Automotive/Complete Vehicles",
-                "반도체": "Semiconductor",
-                "실전투자": "Live Trading",
+                "Automotive/Complete Vehicles": "Automotive/Complete Vehicles",
+                "Semiconductor": "Semiconductor",
+                "Live Trading": "Live Trading",
                 # ... more
             },
             "period": {
-                "단기": "Short-term",
-                "중기": "Mid-term",
-                "장기": "Long-term"
+                "Short-term": "Short-term",
+                "Mid-term": "Mid-term",
+                "Long-term": "Long-term"
             }
         }
     }
