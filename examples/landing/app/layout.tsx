@@ -33,7 +33,7 @@ export const metadata: Metadata = {
     url: 'https://prism-insight-landing.vercel.app',
     siteName: 'PRISM-INSIGHT',
     title: 'PRISM-INSIGHT | AI-Powered Stock Analysis & Automated Trading',
-    description: '13 specialized AI agents analyze Korean & US stocks in real-time. Open source, free to use.',
+    description: '13 specialized AI agents analyze & US stocks in real-time. Open source, free to use.',
     images: [
       {
         url: '/og-image.png',
@@ -46,7 +46,7 @@ export const metadata: Metadata = {
   twitter: {
     card: 'summary_large_image',
     title: 'PRISM-INSIGHT | AI Stock Analysis',
-    description: '13 AI agents for Korean & US stock analysis with automated trading',
+    description: '13 AI agents & US stock analysis with automated trading',
     images: ['/og-image.png'],
   },
   alternates: {
