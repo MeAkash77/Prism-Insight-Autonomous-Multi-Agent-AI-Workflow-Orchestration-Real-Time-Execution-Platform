@@ -28,7 +28,7 @@ function useGitHubStars() {
   const [stars, setStars] = useState<number | null>(null)
 
   useEffect(() => {
-    fetch('https://github.com/MeAkash77/Prism-Insight-Autonomous-Multi-Agent-AI-Workflow-Orchestration-Real-Time-Execution-Platform')
+    fetch('https://api.github.com/repos/MeAkash77/Prism-Insight-Autonomous-Multi-Agent-AI-Workflow-Orchestration-Real-Time-Execution-Platform')
       .then(res => res.json())
       .then(data => setStars(data.stargazers_count))
       .catch(() => setStars(null))
@@ -89,7 +89,8 @@ function MatrixRain() {
     resize()
     window.addEventListener('resize', resize)
 
-    const chars = '01アイウエオカキクケコ株価分析PRISM'
+    // Changed to English/ASCII characters only
+    const chars = '01PRISMSTOCKANALYSIS'
     const fontSize = 14
     const columns = Math.floor(canvas.width / fontSize)
     const drops: number[] = Array(columns).fill(1)
@@ -206,8 +207,8 @@ python demo.py AAPL`
           {/* Badge */}
           <div className="inline-flex items-center gap-2 mb-8 px-4 py-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 backdrop-blur-sm animate-fade-in">
             <span className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
             </span>
             <span className="text-sm font-mono text-emerald-300">Open Source • AGPL-3.0</span>
           </div>
@@ -464,7 +465,7 @@ python demo.py AAPL`
             {!videoPlaying ? (
               <div className="absolute inset-0 flex items-center justify-center bg-zinc-900">
                 <Image
-                  src={`https://img.youtube.com/vi/LVOAdVCh1QE/maxresdefault.jpg`}
+                  src="https://img.youtube.com/vi/LVOAdVCh1QE/maxresdefault.jpg"
                   alt="PRISM-INSIGHT Demo Video"
                   fill
                   className="object-cover opacity-50"
@@ -510,10 +511,10 @@ python demo.py AAPL`
               </div>
               <CardContent className="p-0">
                 <pre className="p-6 text-sm font-mono overflow-x-auto">
-                  <code className="text-zinc-400">
+                  <code>
                     <span className="text-zinc-500"># 1. Clone repository</span>
                     {'\n'}
-                    <span className="text-emerald-400">git clone https://github.com/MeAkash77/Prism-Insight-Autonomous-Multi-Agent-AI-Workflow-Orchestration-Real-Time-Execution-Platform
+                    <span className="text-emerald-400">git clone https://github.com/MeAkash77/Prism-Insight-Autonomous-Multi-Agent-AI-Workflow-Orchestration-Real-Time-Execution-Platform</span>
                     {'\n'}
                     <span className="text-cyan-400">cd</span> prism-insight
                     {'\n\n'}
@@ -533,7 +534,7 @@ python demo.py AAPL`
           <p className="text-center text-sm text-zinc-600 mt-6">
             Or try the{' '}
             <a
-              href="https://github.com/dragon1086/prism-insight#option-b-docker-recommended-for-production"
+              href="https://github.com/MeAkash77/Prism-Insight-Autonomous-Multi-Agent-AI-Workflow-Orchestration-Real-Time-Execution-Platform"
               target="_blank"
               rel="noopener noreferrer"
               className="text-emerald-400 hover:text-emerald-300 underline underline-offset-4"
