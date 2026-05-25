@@ -20,7 +20,8 @@ import {
   Shield,
   ChevronRight,
   Terminal,
-  Heart
+  Heart,
+  BarChart3  // Added for Test Stock button icon
 } from 'lucide-react'
 
 // GitHub star count fetcher (client-side)
@@ -240,7 +241,7 @@ python demo.py AAPL`
             and execute trades automatically via Telegram alerts.
           </p>
 
-          {/* CTA Buttons */}
+          {/* CTA Buttons - Added Test Stock button */}
           <div className="flex flex-col sm:flex-row gap-4 justify-center items-center mb-16">
             <Button
               size="lg"
@@ -268,6 +269,20 @@ python demo.py AAPL`
               <a href="https://analysis.stocksimulation.kr" target="_blank" rel="noopener noreferrer">
                 <ExternalLink className="w-5 h-5" />
                 Live Dashboard
+              </a>
+            </Button>
+
+            {/* NEW: Test Stock Button */}
+            <Button
+              size="lg"
+              variant="outline"
+              className="border-emerald-500/50 hover:border-emerald-500 hover:bg-emerald-500/10 px-8 h-12 text-base gap-2 group"
+              asChild
+            >
+              <a href="https://prism-insight-autonomous-multi-agent-ai.onrender.com" target="_blank" rel="noopener noreferrer">
+                <BarChart3 className="w-5 h-5 text-emerald-400 group-hover:scale-110 transition-transform" />
+                <span className="text-emerald-400">Test Stock</span>
+                <ExternalLink className="w-4 h-4 text-emerald-400/70 group-hover:translate-x-0.5 transition-transform" />
               </a>
             </Button>
           </div>
@@ -321,6 +336,7 @@ python demo.py AAPL`
         </div>
       </section>
 
+      {/* Rest of your sections remain unchanged */}
       {/* Platinum Sponsor Section */}
       <section className="relative py-16 px-4 border-t border-zinc-800/50">
         <div className="max-w-2xl mx-auto text-center">
