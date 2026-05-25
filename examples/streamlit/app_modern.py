@@ -7,7 +7,7 @@ import base64
 import sys
 import os
 
-# 현재 파일의 디렉토리를 Python path에 추가
+# Add current file directory to Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
 if current_dir not in sys.path:
     sys.path.append(current_dir)
@@ -17,11 +17,11 @@ from queue import Queue
 from threading import Thread
 import uuid
 
-# 보고서 저장 디렉토리 설정
+# Report storage directory
 REPORTS_DIR = Path(__file__).parent.parent.parent / "reports"
 REPORTS_DIR.mkdir(exist_ok=True)
 
-# 작업 큐 및 스레드 풀 설정
+# Task queue and thread pool setup
 analysis_queue = Queue()
 
 class AnalysisRequest:
@@ -41,28 +41,28 @@ class ModernStockAnalysisApp:
         self.start_background_worker()
 
     def setup_page(self):
-        """페이지 설정 및 커스텀 CSS 적용"""
+        """Page setup and custom CSS application"""
         st.set_page_config(
-            page_title="analysis.stocksimulation.kr | AI 주식 분석 에이전트",
+            page_title="analysis.stocksimulation.kr | AI Stock Analysis Agent",
             page_icon="📊",
             layout="wide",
-            # Open Graph 메타데이터 추가
+            # Open Graph metadata
             menu_items={
                 'Get Help': None,
                 'Report a bug': None,
                 'About': """
                 # analysis.stocksimulation.kr
-                AI 주식 분석 에이전트
+                AI Stock Analysis Agent
                 """
             }
         )
 
-        # Open Graph 태그 직접 주입
+        # Direct Open Graph tag injection
         og_html = """
         <head>
-            <title>analysis.stocksimulation.kr | AI 주식 분석 에이전트</title>
-            <meta property="og:title" content="analysis.stocksimulation.kr | AI 주식 분석 에이전트" />
-            <meta property="og:description" content="AI 주식 분석 에이전트" />
+            <title>analysis.stocksimulation.kr | AI Stock Analysis Agent</title>
+            <meta property="og:title" content="analysis.stocksimulation.kr | AI Stock Analysis Agent" />
+            <meta property="og:description" content="AI Stock Analysis Agent" />
             <meta property="og:image" content="https://media.istockphoto.com/id/2045262949/ko/%EC%82%AC%EC%A7%84/excited-businessman-raises-hands-and-punches-air-while-celebrating-successful-deal-stock.jpg?s=2048x2048&w=is&k=20&c=XtdmbV6gILRK1ahoMOf0_SFC256rgHyiaID_FeW4ojU=" />
             <meta property="og:url" content="https://analysis.stocksimulation.kr" />
             <meta property="og:type" content="website" />
@@ -71,20 +71,20 @@ class ModernStockAnalysisApp:
         """
         st.markdown(og_html, unsafe_allow_html=True)
 
-        # 커스텀 CSS 적용
+        # Apply custom CSS
         self.apply_custom_styles()
 
     def apply_custom_styles(self):
-        """모던한 디자인을 위한 커스텀 CSS 스타일 적용"""
+        """Custom CSS styling for modern design"""
         st.markdown("""
         <style>
-            /* 전체 페이지 스타일 */
+            /* Overall page style */
             .main {
                 background-color: #fafafa;
                 padding: 1.5rem;
             }
             
-            /* 제목 및 헤더 스타일 */
+            /* Title and header styles */
             h1, h2, h3 {
                 font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, 'Helvetica Neue', sans-serif;
                 color: #1E293B;
@@ -107,7 +107,7 @@ class ModernStockAnalysisApp:
                 color: #334155;
             }
             
-            /* 카드 컨테이너 스타일 */
+            /* Card container styles */
             .card {
                 background-color: white;
                 border-radius: 12px;
@@ -122,7 +122,7 @@ class ModernStockAnalysisApp:
                 box-shadow: 0 8px 16px rgba(0, 0, 0, 0.08);
             }
             
-            /* 폼 요소 스타일 */
+            /* Form element styles */
             .stTextInput > div > div > input {
                 border-radius: 8px;
                 height: 2.8rem;
@@ -136,7 +136,7 @@ class ModernStockAnalysisApp:
                 border-radius: 8px;
             }
             
-            /* 버튼 스타일 */
+            /* Button styles */
             .stButton > button {
                 background-color: #0EA5E9;
                 color: white;
@@ -155,19 +155,19 @@ class ModernStockAnalysisApp:
                 transform: translateY(0);
             }
             
-            /* 선택 요소 스타일 */
+            /* Select element styles */
             .stSelectbox > div > div {
                 border-radius: 8px;
                 border: 1px solid #E2E8F0;
             }
             
-            /* 사이드바 스타일 */
+            /* Sidebar styles */
             .css-1d391kg, .css-1om1kqc, .css-1n76uvr {
                 background-color: #F8FAFC;
                 padding: 2rem 1rem;
             }
             
-            /* 상태 메시지 스타일 */
+            /* Status message styles */
             .stAlert {
                 border-radius: 8px;
                 padding: 1rem;
@@ -193,7 +193,7 @@ class ModernStockAnalysisApp:
                 border: 1px solid #DBEAFE;
             }
             
-            /* 테이블 스타일 */
+            /* Table styles */
             .dataframe {
                 font-family: 'Pretendard', -apple-system, system-ui, sans-serif;
                 width: 100%;
@@ -216,7 +216,7 @@ class ModernStockAnalysisApp:
                 background-color: #F8FAFC;
             }
             
-            /* 다운로드 링크 스타일 */
+            /* Download link styles */
             a {
                 color: #0EA5E9;
                 text-decoration: none;
@@ -243,12 +243,12 @@ class ModernStockAnalysisApp:
                 text-decoration: none;
             }
             
-            /* 프로그레스 표시 스타일 */
+            /* Progress display styles */
             .stProgress > div > div {
                 background-color: #0EA5E9;
             }
             
-            /* 마크다운 본문 스타일 */
+            /* Markdown body styles */
             .markdown-body {
                 font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
                 color: #334155;
@@ -273,13 +273,13 @@ class ModernStockAnalysisApp:
                 background-color: #F1F5F9;
             }
             
-            /* 이미지 스타일 */
+            /* Image styles */
             img {
                 border-radius: 8px;
                 box-shadow: 0 4px 8px rgba(0, 0, 0, 0.05);
             }
             
-            /* 헤더 스타일 */
+            /* Header styles */
             .header {
                 display: flex;
                 flex-direction: column;
@@ -312,7 +312,7 @@ class ModernStockAnalysisApp:
                 font-weight: 400;
             }
             
-            /* 사이드바 헤더 */
+            /* Sidebar header */
             .sidebar-header {
                 display: flex;
                 align-items: center;
@@ -328,7 +328,7 @@ class ModernStockAnalysisApp:
                 color: #0EA5E9;
             }
             
-            /* 상태 카드 */
+            /* Status card */
             @keyframes progress-animation {
                 0% { width: 0%; }
                 20% { width: 20%; }
@@ -390,7 +390,7 @@ class ModernStockAnalysisApp:
                 animation: progress-animation 2s infinite alternate;
             }
             
-            /* 기능 리스트 스타일 */
+            /* Feature list styles */
             .feature-list {
                 list-style-type: none;
                 padding: 0;
@@ -412,7 +412,7 @@ class ModernStockAnalysisApp:
                 margin-right: 0.5rem;
             }
             
-            /* 시간 표시 스타일 */
+            /* Time display styles */
             .estimate-time {
                 display: flex;
                 align-items: center;
@@ -440,7 +440,7 @@ class ModernStockAnalysisApp:
                 margin-top: 0.3rem;
             }
             
-            /* 폼 카드 */
+            /* Form card */
             .form-card, .report-card, .filter-card {
                 background-color: white;
                 border-radius: 12px;
@@ -450,7 +450,7 @@ class ModernStockAnalysisApp:
                 border: 1px solid #F1F5F9;
             }
             
-            /* 마크다운 미리보기 */
+            /* Markdown preview */
             .markdown-preview {
                 padding: 1rem;
                 border: 1px solid #E2E8F0;
@@ -463,7 +463,7 @@ class ModernStockAnalysisApp:
         """, unsafe_allow_html=True)
 
     def add_app_header(self):
-        """앱 헤더와 브랜딩 추가"""
+        """Add app header and branding"""
         st.markdown("""
         <div class="header">
             <div class="logo-container">
@@ -471,13 +471,13 @@ class ModernStockAnalysisApp:
                 <div class="app-title">analysis.stocksimulation.kr</div>
             </div>
             <div class="app-description">
-                AI 주식 분석 에이전트
+                AI Stock Analysis Agent
             </div>
         </div>
         """, unsafe_allow_html=True)
 
     def create_card(self, title, content, icon=None):
-        """카드 컴포넌트 생성"""
+        """Create card component"""
         icon_html = f'<div class="card-icon">{icon}</div>' if icon else ''
         
         st.markdown(f"""
@@ -514,14 +514,14 @@ class ModernStockAnalysisApp:
         """, unsafe_allow_html=True)
 
     def initialize_session_state(self):
-        """세션 상태 초기화"""
+        """Initialize session state"""
         if 'requests' not in st.session_state:
             st.session_state.requests = {}
         if 'processing' not in st.session_state:
             st.session_state.processing = False
 
     def start_background_worker(self):
-        """백그라운드 작업자 시작"""
+        """Start background worker"""
         def worker():
             while True:
                 request = analysis_queue.get()
@@ -532,32 +532,32 @@ class ModernStockAnalysisApp:
                 finally:
                     analysis_queue.task_done()
 
-        for _ in range(5):  # 5개의 워커 스레드 시작
+        for _ in range(5):  # Start 5 worker threads
             Thread(target=worker, daemon=True).start()
 
     def process_analysis_request(self, request: AnalysisRequest):
-        """분석 요청 처리"""
+        """Process analysis request"""
         try:
-            # 캐시된 보고서 확인
+            # Check for cached report
             is_cached, cached_content, cached_file = self.get_cached_report(
                 request.stock_code, request.reference_date
             )
 
             if is_cached:
-                # 캐시된 보고서가 있으면 바로 이메일 전송
+                # Send email immediately if cached report exists
                 send_email(request.email, cached_content)
-                request.result = f"캐시된 분석 보고서가 이메일로 전송되었습니다. (파일: {cached_file.name})"
+                request.result = f"Cached analysis report has been sent via email. (File: {cached_file.name})"
             else:
-                # 별도 프로세스로 분석 실행
+                # Run analysis as separate process
                 import subprocess
                 import tempfile
                 import json
 
-                # 프로젝트 루트 디렉토리와 streamlit 디렉토리 경로
+                # Project root directory and streamlit directory paths
                 project_root = str(Path(__file__).parent.parent.parent.absolute())
                 streamlit_dir = str(Path(__file__).parent.absolute())
 
-                # 요청 정보를 임시 파일에 저장
+                # Save request info to temporary file
                 with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
                     request_info = {
                         'stock_code': request.stock_code,
@@ -569,19 +569,19 @@ class ModernStockAnalysisApp:
                     json.dump(request_info, f)
                     request_file = f.name
 
-                # 별도 프로세스 실행
+                # Run separate process
                 subprocess.Popen([
                     "python", "-c",
                     f'''
 import asyncio, json, os, sys
 
-# Python path 설정
+# Set Python path
 project_root = "{project_root}"
 streamlit_dir = "{streamlit_dir}"
 sys.path.insert(0, project_root)
 sys.path.insert(0, streamlit_dir)
 
-# 작업 디렉토리 변경
+# Change working directory
 os.chdir(project_root)
 
 print(f"Working directory: {{os.getcwd()}}")
@@ -601,11 +601,11 @@ except ImportError as e:
     print(f"Failed to import send_email: {{e}}")
     exit(1)
 
-# 요청 정보 로드
+# Load request info
 with open("{request_file}", "r") as f:
     info = json.load(f)
 
-# 분석 실행
+# Run analysis
 async def run():
     try:
         print(f"Starting analysis for {{info['company_name']}} ({{info['stock_code']}})")
@@ -615,18 +615,18 @@ async def run():
             reference_date=info["reference_date"]
         )
         
-        # 결과 저장
+        # Save results
         with open(info["output_file"], "w", encoding="utf-8") as f:
             f.write(report)
         print(f"Report saved to {{info['output_file']}}")
         
-        # 이메일 전송 
+        # Send email 
         if send_email(info["email"], report):
             print(f"Email sent successfully to {{info['email']}}")
         else:
             print(f"Failed to send email to {{info['email']}}")
         
-        # 임시 파일 삭제
+        # Delete temporary file
         os.remove("{request_file}")
         print("Analysis completed successfully")
         
@@ -639,17 +639,17 @@ asyncio.run(run())
 '''
                 ], cwd=project_root)
 
-                request.result = f"분석이 시작되었습니다. 완료 후 이메일로 결과가 전송됩니다."
+                request.result = f"Analysis has started. Results will be sent via email upon completion."
 
             request.status = "completed"
 
         except Exception as e:
             request.status = "failed"
-            request.result = f"분석 중 오류가 발생했습니다: {str(e)}"
+            request.result = f"An error occurred during analysis: {str(e)}"
 
     @staticmethod
     def get_cached_report(stock_code: str, reference_date: str) -> tuple[bool, str, Path | None]:
-        """캐시된 보고서 검색"""
+        """Search for cached report"""
         report_pattern = f"{stock_code}_*_{reference_date}*.md"
         matching_files = list(REPORTS_DIR.glob(report_pattern))
 
@@ -661,7 +661,7 @@ asyncio.run(run())
 
     @staticmethod
     def save_report(stock_code: str, company_name: str, reference_date: str, content: str) -> Path:
-        """보고서를 파일로 저장"""
+        """Save report to file"""
         filename = f"{stock_code}_{company_name}_{reference_date}_gpt4o.md"
         filepath = REPORTS_DIR / filename
 
@@ -671,99 +671,99 @@ asyncio.run(run())
         return filepath
 
     def submit_analysis(self, stock_code: str, company_name: str, email: str, reference_date: str) -> str:
-        """분석 요청 제출"""
+        """Submit analysis request"""
         request = AnalysisRequest(stock_code, company_name, email, reference_date)
         st.session_state.requests[request.id] = request
         analysis_queue.put(request)
         return request.id
 
     def render_modern_analysis_form(self):
-        """모던한 디자인의 분석 요청 폼"""
-        # 커스텀 헤더 추가
+        """Modern design analysis request form"""
+        # Add custom header
         self.add_app_header()
 
-        # 앱 설명 카드 (텍스트만 사용)
-        st.markdown("### 🤖 AI 주식 분석 에이전트 서비스")
-        st.markdown("이 서비스는 AI를 활용하여 종목을 심층 분석하고 전문가 수준의 투자 분석 보고서를 자동으로 생성합니다. 회사 정보와 이메일을 입력하시면 분석이 완료된 후 결과가 이메일로 전송됩니다.")
+        # App description card
+        st.markdown("### 🤖 AI Stock Analysis Agent Service")
+        st.markdown("This service utilizes AI to conduct in-depth stock analysis and automatically generates professional-grade investment analysis reports. Enter company information and your email, and the results will be sent to you upon completion.")
 
-        # 두 개의 열로 나누어 레이아웃 구성
+        # Two-column layout
         col1, col2 = st.columns([2, 1])
 
         with col1:
-            # 분석 요청 카드
-            st.markdown("## 분석 요청")
+            # Analysis request card
+            st.markdown("## Analysis Request")
 
             with st.form("analysis_form"):
                 form_col1, form_col2 = st.columns(2)
 
                 with form_col1:
-                    company_name = st.text_input("회사명", placeholder="예: 삼성전자")
-                    email = st.text_input("이메일 주소", placeholder="결과를 받을 이메일")
+                    company_name = st.text_input("Company Name", placeholder="Example: Samsung Electronics")
+                    email = st.text_input("Email Address", placeholder="Email to receive results")
 
                 with form_col2:
-                    stock_code = st.text_input("종목코드", placeholder="예: 005930 (6자리)")
+                    stock_code = st.text_input("Stock Code", placeholder="Example: 005930 (6 digits)")
                     today = datetime.now().date()
                     analysis_date = st.date_input(
-                        "분석 기준일",
+                        "Analysis Reference Date",
                         value=today,
                         max_value=today
                     )
 
-                # FAQ 토글
-                with st.expander("📌 자주 묻는 질문"):
+                # FAQ toggle
+                with st.expander("📌 Frequently Asked Questions"):
                     st.markdown("""
-                    **Q: 분석은 얼마나 걸리나요?**  
-                    A: 일반적으로 5-10분 정도 소요됩니다.
+                    **Q: How long does the analysis take?**  
+                    A: Typically, it takes 5-10 minutes.
                     
-                    **Q: 어떤 정보가 포함되나요?**  
-                    A: 주가 분석, 재무제표 분석, 경쟁사 비교, 투자 지표, 뉴스 분석 등이 포함됩니다.
+                    **Q: What information is included?**  
+                    A: Stock price analysis, financial statement analysis, competitor comparison, investment indicators, news analysis, etc.
                     
-                    **Q: 결과는 어떻게 받나요?**  
-                    A: 입력한 이메일로 결과가 전송되며, 이 사이트의 '보고서 보기' 메뉴에서도 확인 가능합니다.
+                    **Q: How do I receive the results?**  
+                    A: Results are sent to the email you provided and can also be viewed in the 'View Reports' menu on this site.
                     """)
 
-                # 디자인된 제출 버튼
+                # Styled submit button
                 submit_col1, submit_col2, submit_col3 = st.columns([1, 2, 1])
                 with submit_col2:
-                    submitted = st.form_submit_button("분석 시작", use_container_width=True)
+                    submitted = st.form_submit_button("Start Analysis", use_container_width=True)
 
-            # 폼 제출 처리
+            # Form submission handling
             if submitted:
                 if not self.validate_inputs(company_name, stock_code, email):
                     return
 
                 reference_date = analysis_date.strftime("%Y%m%d")
                 request_id = self.submit_analysis(stock_code, company_name, email, reference_date)
-                st.success("분석이 요청되었습니다. 완료되면 이메일로 결과가 전송됩니다. 이후 이 웹사이트에 재접속 후 '보고서 보기' 메뉴에서도 보실 수 있습니다.")
+                st.success("Analysis has been requested. Results will be sent to your email upon completion. You can also view them later in the 'View Reports' menu on this website.")
 
         with col2:
-            # 분석 정보 카드 (네이티브 컴포넌트 사용)
-            st.markdown("### ✨ 분석 내용")
+            # Analysis info card
+            st.markdown("### ✨ Analysis Features")
             features = [
-                {"icon": "📊", "title": "기술적 분석", "desc": "주가 패턴 및 모멘텀 분석"},
-                {"icon": "💰", "title": "재무 분석", "desc": "종합적인 재무제표 분석"},
-                {"icon": "🏢", "title": "경쟁사 비교", "desc": "동종업계 내 상대적 위치 평가"},
-                {"icon": "📈", "title": "투자 지표", "desc": "PER, PBR, ROE 등 핵심 투자지표"},
-                {"icon": "📰", "title": "뉴스 분석", "desc": "최신 뉴스 및 시장 반응 분석"}
+                {"icon": "📊", "title": "Technical Analysis", "desc": "Stock price patterns and momentum analysis"},
+                {"icon": "💰", "title": "Financial Analysis", "desc": "Comprehensive financial statement analysis"},
+                {"icon": "🏢", "title": "Competitor Comparison", "desc": "Relative position evaluation within the industry"},
+                {"icon": "📈", "title": "Investment Indicators", "desc": "PER, PBR, ROE and other key investment metrics"},
+                {"icon": "📰", "title": "News Analysis", "desc": "Latest news and market reaction analysis"}
             ]
 
             for feature in features:
                 st.markdown(f"{feature['icon']} **{feature['title']}** - {feature['desc']}")
 
-            # 분석 완료 예상 시간 (네이티브 컴포넌트 사용)
-            st.markdown("### 분석 예상 시간")
-            st.markdown("⏱️ **5-10분**")
-            st.markdown("분석 완료 후 이메일로 전송됩니다")
+            # Estimated completion time
+            st.markdown("### Estimated Analysis Time")
+            st.markdown("⏱️ **5-10 minutes**")
+            st.markdown("Results will be sent via email upon completion")
 
-        # 분석 상태 섹션
+        # Analysis status section
         if st.session_state.requests:
             self.render_request_status()
 
     def render_request_status(self):
-        """요청 상태를 표시하는 메서드"""
-        st.markdown("## 📋 진행 중인 분석")
+        """Method to display request status"""
+        st.markdown("## 📋 In-Progress Analysis")
 
-        # 요청 목록을 상태별로 분류
+        # Categorize requests by status
         pending_requests = []
         completed_requests = []
         failed_requests = []
@@ -776,111 +776,111 @@ asyncio.run(run())
             elif request.status == "failed":
                 failed_requests.append(request)
 
-        # 진행 중인 요청 표시
+        # Display pending requests
         if pending_requests:
             for request in pending_requests:
-                st.info(f"⏳ {request.company_name} ({request.stock_code}) - 분석 진행 중... (약 5-10분 소요)")
+                st.info(f"⏳ {request.company_name} ({request.stock_code}) - Analysis in progress... (approximately 5-10 minutes)")
 
-        # 완료된 요청 표시
+        # Display completed requests
         if completed_requests:
             for request in completed_requests:
                 st.success(f"✅ {request.company_name} ({request.stock_code}) - {request.result}")
 
-        # 실패한 요청 표시
+        # Display failed requests
         if failed_requests:
             for request in failed_requests:
                 st.error(f"❌ {request.company_name} ({request.stock_code}) - {request.result}")
 
     def render_modern_report_viewer(self):
-        """모던한 디자인의 보고서 뷰어"""
-        # 커스텀 헤더 추가
+        """Modern design report viewer"""
+        # Add custom header
         self.add_app_header()
         
-        # 보고서 뷰어 소개
+        # Report viewer introduction
         intro_content = """
-        <p>과거에 생성된 분석 보고서를 검색하고 열람할 수 있습니다. 
-        종목코드로 검색하거나 목록에서 선택하여 보고서를 확인하세요.</p>
+        <p>Search and view previously generated analysis reports. 
+        Search by stock code or select from the list to view reports.</p>
         """
-        self.create_card("보고서 뷰어", intro_content, "📑")
+        self.create_card("Report Viewer", intro_content, "📑")
         
-        # 검색 및 필터 영역
+        # Search and filter area
         col1, col2 = st.columns([1, 3])
         
         with col1:
             st.markdown('<div class="filter-card">', unsafe_allow_html=True)
-            st.subheader("보고서 검색")
-            search_code = st.text_input("종목코드로 검색", placeholder="예: 005930")
+            st.subheader("Search Reports")
+            search_code = st.text_input("Search by Stock Code", placeholder="Example: 005930")
             
-            # 저장된 보고서 목록 가져오기
+            # Get list of saved reports
             reports = list(REPORTS_DIR.glob("*.md"))
             
             if search_code:
                 reports = [r for r in reports if search_code in r.stem]
             
             if not reports:
-                st.warning("저장된 보고서가 없습니다.")
+                st.warning("No saved reports found.")
                 st.markdown('</div>', unsafe_allow_html=True)
                 return
             
-            # 보고서 분류
-            st.markdown("### 보고서 분류")
+            # Categorize reports
+            st.markdown("### Report Categories")
             report_dates = {}
             
             for report in reports:
-                # 파일 수정 날짜 기준으로 분류
+                # Categorize by file modification date
                 mod_date = datetime.fromtimestamp(report.stat().st_mtime).strftime('%Y-%m-%d')
                 if mod_date not in report_dates:
                     report_dates[mod_date] = []
                 report_dates[mod_date].append(report)
             
-            # 날짜별 보고서 개수 표시
+            # Display report count by date
             for date, date_reports in sorted(report_dates.items(), reverse=True):
-                st.markdown(f"**{date}** ({len(date_reports)}개)")
+                st.markdown(f"**{date}** ({len(date_reports)} reports)")
             
             st.markdown('</div>', unsafe_allow_html=True)
         
         with col2:
-            # 보고서 선택 및 표시 영역
+            # Report selection and display area
             st.markdown('<div class="report-card">', unsafe_allow_html=True)
-            st.subheader("보고서 목록")
+            st.subheader("Report List")
             
-            # 보고서 정렬 (최신순)
+            # Sort reports (newest first)
             reports.sort(key=lambda x: x.stat().st_mtime, reverse=True)
             
-            # 보고서 선택을 위한 현대적인 UI
+            # Modern UI for report selection
             report_options = [f"{r.stem} ({datetime.fromtimestamp(r.stat().st_mtime).strftime('%Y-%m-%d %H:%M')})" for r in reports]
             report_dict = dict(zip(report_options, reports))
             
             selected_report_name = st.selectbox(
-                "보고서 선택",
+                "Select Report",
                 options=report_options
             )
             
             if selected_report_name:
                 selected_report = report_dict[selected_report_name]
                 
-                # 보고서 메타데이터 표시
+                # Display report metadata
                 report_meta_col1, report_meta_col2 = st.columns(2)
                 with report_meta_col1:
-                    st.markdown(f"**생성일시:** {datetime.fromtimestamp(selected_report.stat().st_mtime).strftime('%Y-%m-%d %H:%M:%S')}")
+                    st.markdown(f"**Created:** {datetime.fromtimestamp(selected_report.stat().st_mtime).strftime('%Y-%m-%d %H:%M:%S')}")
                 with report_meta_col2:
-                    st.markdown(f"**파일 크기:** {selected_report.stat().st_size / 1024:.1f} KB")
+                    st.markdown(f"**File Size:** {selected_report.stat().st_size / 1024:.1f} KB")
                 
-                # 다운로드 버튼 영역
-                st.markdown("### 다운로드 옵션")
+                # Download button area
+                st.markdown("### Download Options")
                 download_col1, download_col2 = st.columns(2)
                 with download_col1:
                     st.markdown(self.get_download_link(selected_report, 'md'), unsafe_allow_html=True)
                 with download_col2:
                     st.markdown(self.get_download_link(selected_report, 'html'), unsafe_allow_html=True)
                 
-                # 보고서 미리보기
-                st.markdown("### 보고서 미리보기")
+                # Report preview
+                st.markdown("### Report Preview")
                 
                 with open(selected_report, 'r', encoding='utf-8') as f:
                     content = f.read()
                 
-                # 스타일이 적용된 마크다운으로 보여주기
+                # Display with styled markdown
                 st.markdown('<div class="markdown-preview">', unsafe_allow_html=True)
                 st.markdown(content)
                 st.markdown('</div>', unsafe_allow_html=True)
@@ -888,17 +888,17 @@ asyncio.run(run())
             st.markdown('</div>', unsafe_allow_html=True)
 
     def validate_inputs(self, company_name: str, stock_code: str, email: str) -> bool:
-        """입력값 유효성 검사"""
+        """Validate input values"""
         if not company_name:
-            st.error("회사명을 입력해주세요.")
+            st.error("Please enter the company name.")
             return False
 
         if not self.is_valid_stock_code(stock_code):
-            st.error("올바른 종목코드를 입력해주세요 (6자리 숫자).")
+            st.error("Please enter a valid stock code (6-digit number).")
             return False
 
         if not self.is_valid_email(email):
-            st.error("올바른 이메일 주소를 입력해주세요.")
+            st.error("Please enter a valid email address.")
             return False
 
         return True
@@ -914,12 +914,12 @@ asyncio.run(run())
 
     @staticmethod
     def get_download_link(file_path: Path, file_format: str) -> str:
-        """다운로드 링크 생성"""
+        """Generate download link"""
         with open(file_path, 'r', encoding='utf-8') as f:
             data = f.read()
 
         if file_format == 'html':
-            # 마크다운을 HTML로 변환
+            # Convert markdown to HTML
             html_content = markdown.markdown(
                 data,
                 extensions=['markdown.extensions.fenced_code', 'markdown.extensions.tables']
@@ -931,11 +931,11 @@ asyncio.run(run())
             extension = 'md'
 
         filename = f"{file_path.stem}.{extension}"
-        return f'<a href="data:file/{extension};base64,{b64}" download="{filename}">💾 {extension.upper()} 형식으로 다운로드</a>'
+        return f'<a href="data:file/{extension};base64,{b64}" download="{filename}">💾 Download as {extension.upper()}</a>'
 
     def main(self):
-        """메인 애플리케이션 실행"""
-        # 사이드바 디자인 개선
+        """Main application execution"""
+        # Improved sidebar design
         st.sidebar.markdown("""
         <div class="sidebar-header">
             <div class="sidebar-logo">📊</div>
@@ -943,28 +943,28 @@ asyncio.run(run())
         </div>
         """, unsafe_allow_html=True)
         
-        st.sidebar.title("메뉴")
+        st.sidebar.title("Menu")
         
-        # 모던한 사이드바 메뉴
+        # Modern sidebar menu
         menu_options = {
-            "분석 요청": "📝",
-            "보고서 보기": "📚"
+            "Analysis Request": "📝",
+            "View Reports": "📚"
         }
         
         menu = st.sidebar.radio(
-            "선택",
+            "Select",
             list(menu_options.keys()),
             format_func=lambda x: f"{menu_options[x]} {x}"
         )
         
-        # 앱 버전 및 소셜 링크
+        # App version and social links
         st.sidebar.markdown("---")
-        st.sidebar.markdown("#### 서비스 정보")
-        st.sidebar.markdown("버전: v1.0.2")
+        st.sidebar.markdown("#### Service Information")
+        st.sidebar.markdown("Version: v1.0.2")
         st.sidebar.markdown("© 2025 https://analysis.stocksimulation.kr")
         
-        # 메인 콘텐츠 렌더링
-        if menu == "분석 요청":
+        # Render main content
+        if menu == "Analysis Request":
             self.render_modern_analysis_form()
         else:
             self.render_modern_report_viewer()
