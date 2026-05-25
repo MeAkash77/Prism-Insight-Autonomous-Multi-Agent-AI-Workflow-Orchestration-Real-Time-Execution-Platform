@@ -62,7 +62,7 @@ def send_email(to_email: str, report_content: str) -> bool:
         msg = MIMEMultipart('alternative')
         msg['From'] = SENDER_EMAIL
         msg['To'] = to_email
-        msg['Subject'] = "주식 종목 분석 보고서"
+        msg['Subject'] = "Stock Analysis Report"
 
         # 1. HTML version (main content)
         html_content = convert_md_to_html(report_content)
