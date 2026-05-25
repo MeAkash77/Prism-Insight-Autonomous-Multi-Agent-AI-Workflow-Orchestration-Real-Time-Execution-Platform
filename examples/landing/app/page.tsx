@@ -533,7 +533,7 @@ python demo.py AAPL`
           <p className="text-center text-sm text-zinc-600 mt-6">
             Or try the{' '}
             <a
-              href="https://github.com/MeAkash77/Prism-Insight-Autonomous-Multi-Agent-AI-Workflow-Orchestration-Real-Time-Execution-Platform"
+              href="https://github.com/dragon1086/prism-insight#option-b-docker-recommended-for-production"
               target="_blank"
               rel="noopener noreferrer"
               className="text-emerald-400 hover:text-emerald-300 underline underline-offset-4"
