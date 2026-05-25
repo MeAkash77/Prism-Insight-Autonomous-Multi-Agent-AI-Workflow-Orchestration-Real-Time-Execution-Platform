@@ -28,7 +28,7 @@ function useGitHubStars() {
   const [stars, setStars] = useState<number | null>(null)
 
   useEffect(() => {
-    fetch('https://api.github.com/repos/dragon1086/prism-insight')
+    fetch('https://github.com/MeAkash77/Prism-Insight-Autonomous-Multi-Agent-AI-Workflow-Orchestration-Real-Time-Execution-Platform')
       .then(res => res.json())
       .then(data => setStars(data.stargazers_count))
       .catch(() => setStars(null))
@@ -175,7 +175,7 @@ export default function LandingPage() {
   const [videoPlaying, setVideoPlaying] = useState(false)
 
   const quickstartCode = `# 1. Clone repository
-git clone https://github.com/dragon1086/prism-insight.git
+git clone https://github.com/MeAkash77/Prism-Insight-Autonomous-Multi-Agent-AI-Workflow-Orchestration-Real-Time-Execution-Platform.git
 cd prism-insight
 
 # 2. Quick setup (requires OpenAI API key)
@@ -246,7 +246,7 @@ python demo.py AAPL`
               className="bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-semibold px-8 h-12 text-base gap-2 group"
               asChild
             >
-              <a href="https://github.com/dragon1086/prism-insight" target="_blank" rel="noopener noreferrer">
+              <a href="https://github.com/MeAkash77/Prism-Insight-Autonomous-Multi-Agent-AI-Workflow-Orchestration-Real-Time-Execution-Platform" target="_blank" rel="noopener noreferrer">
                 <Github className="w-5 h-5" />
                 <span>Star on GitHub</span>
                 {stars !== null && (
@@ -513,7 +513,7 @@ python demo.py AAPL`
                   <code className="text-zinc-400">
                     <span className="text-zinc-500"># 1. Clone repository</span>
                     {'\n'}
-                    <span className="text-emerald-400">git clone</span> https://github.com/dragon1086/prism-insight.git
+                    <span className="text-emerald-400">git clone https://github.com/MeAkash77/Prism-Insight-Autonomous-Multi-Agent-AI-Workflow-Orchestration-Real-Time-Execution-Platform
                     {'\n'}
                     <span className="text-cyan-400">cd</span> prism-insight
                     {'\n\n'}
@@ -533,7 +533,7 @@ python demo.py AAPL`
           <p className="text-center text-sm text-zinc-600 mt-6">
             Or try the{' '}
             <a
-              href="https://github.com/dragon1086/prism-insight#option-b-docker-recommended-for-production"
+              href="https://github.com/MeAkash77/Prism-Insight-Autonomous-Multi-Agent-AI-Workflow-Orchestration-Real-Time-Execution-Platform"
               target="_blank"
               rel="noopener noreferrer"
               className="text-emerald-400 hover:text-emerald-300 underline underline-offset-4"
@@ -657,7 +657,7 @@ python demo.py AAPL`
               className="bg-pink-500 hover:bg-pink-400 text-white font-semibold px-8 h-12"
               asChild
             >
-              <a href="https://github.com/sponsors/dragon1086" target="_blank" rel="noopener noreferrer">
+              <a href="https://github.com/MeAkash77/Prism-Insight-Autonomous-Multi-Agent-AI-Workflow-Orchestration-Real-Time-Execution-Platform" target="_blank" rel="noopener noreferrer">
                 <Heart className="w-5 h-5 mr-2" />
                 Become a Sponsor
               </a>
@@ -669,7 +669,7 @@ python demo.py AAPL`
               className="border-zinc-700 hover:border-zinc-500 hover:bg-zinc-900 px-8 h-12"
               asChild
             >
-              <a href="https://github.com/dragon1086/prism-insight" target="_blank" rel="noopener noreferrer">
+              <a href="https://github.com/MeAkash77/Prism-Insight-Autonomous-Multi-Agent-AI-Workflow-Orchestration-Real-Time-Execution-Platform" target="_blank" rel="noopener noreferrer">
                 <Star className="w-5 h-5 mr-2" />
                 Star on GitHub
               </a>
@@ -695,7 +695,7 @@ python demo.py AAPL`
 
             <div className="flex items-center gap-6 text-sm text-zinc-500">
               <a
-                href="https://github.com/dragon1086/prism-insight"
+                href="https://github.com/MeAkash77/Prism-Insight-Autonomous-Multi-Agent-AI-Workflow-Orchestration-Real-Time-Execution-Platform"
                 className="hover:text-zinc-300 transition-colors flex items-center gap-2"
                 target="_blank"
                 rel="noopener noreferrer"
