@@ -10,7 +10,7 @@ const geistMono = Geist_Mono({ subsets: ["latin"], variable: "--font-mono" })
 export const metadata: Metadata = {
   metadataBase: new URL('https://prism-insight-landing.vercel.app'),
   title: 'PRISM-INSIGHT | AI-Powered Stock Analysis & Automated Trading',
-  description: '13 specialized AI agents analyze Korean & US stocks in real-time, generate trading signals, and execute trades automatically. Open source, free to use.',
+  description: '13 specialized AI agents analyze & US stocks in real-time, generate trading signals, and execute trades automatically. Open source, free to use.',
   keywords: [
     'stock analysis',
     'AI trading',
