@@ -31,7 +31,7 @@ function getDataFilePath(market: Market, language: string): string {
   }
 }
 
-// Suspense 경계를 위한 로딩 컴포넌트
+// Loading component for Suspense boundary
 function LoadingSpinner() {
   return (
     <div className="flex items-center justify-center min-h-screen">
@@ -43,7 +43,7 @@ function LoadingSpinner() {
   )
 }
 
-// 메인 대시보드 컴포넌트 (useSearchParams 사용)
+// Main dashboard component (uses useSearchParams)
 function DashboardContent() {
   const { language, t } = useLanguage()
   const [market, setMarket] = useMarket()
@@ -54,11 +54,11 @@ function DashboardContent() {
   const [isRealTrading, setIsRealTrading] = useState(false)
   const [dataError, setDataError] = useState<string | null>(null)
 
-  // URL에서 탭 파라미터 읽기
+  // Read tab parameter from URL
   const tabParam = searchParams.get("tab") as TabType | null
   const activeTab: TabType = tabParam && VALID_TABS.includes(tabParam) ? tabParam : "dashboard"
 
-  // 탭 변경 시 URL 업데이트
+  // Update URL when tab changes
   const handleTabChange = (tab: TabType) => {
     // Jeoningu Lab is only available for KR market
     if (tab === "jeoningu-lab" && market === "US") {
@@ -94,7 +94,7 @@ function DashboardContent() {
           // US data file might not exist yet
           if (market === "US" && response.status === 404) {
             setDataError(language === "ko"
-              ? "미국 시장 데이터가 아직 없습니다. 곧 추가될 예정입니다."
+              ? "US market data is not available yet. Coming soon."
               : "US market data is not available yet. Coming soon."
             )
             setData(null)
@@ -109,7 +109,7 @@ function DashboardContent() {
         console.error("[v0] Failed to fetch dashboard data:", error)
         if (market === "US") {
           setDataError(language === "ko"
-            ? "미국 시장 데이터를 불러올 수 없습니다."
+            ? "Failed to load US market data."
             : "Failed to load US market data."
           )
         }
@@ -117,7 +117,7 @@ function DashboardContent() {
     }
 
     fetchData()
-    const interval = setInterval(fetchData, 5 * 60 * 1000) // 5분마다 갱신
+    const interval = setInterval(fetchData, 5 * 60 * 1000) // Refresh every 5 minutes
 
     return () => clearInterval(interval)
   }, [language, market])
@@ -142,7 +142,7 @@ function DashboardContent() {
             <p className="text-muted-foreground">{dataError}</p>
             <p className="text-sm text-muted-foreground/70 mt-2">
               {language === "ko"
-                ? "다른 시장을 선택하거나 나중에 다시 시도해 주세요."
+                ? "Please select another market or try again later."
                 : "Please select another market or try again later."
               }
             </p>
@@ -176,10 +176,10 @@ function DashboardContent() {
       <main className="container mx-auto px-4 py-6 max-w-[1600px]">
         {activeTab === "dashboard" && (
           <div className="space-y-6">
-            {/* 운영 비용 카드 - 최상단 배치 */}
+            {/* Operating costs card - placed at the top */}
             <OperatingCostsCard costs={data.operating_costs} />
 
-            {/* 트리거 신뢰도 미니 배지 */}
+            {/* Trigger reliability mini badge */}
             {data.trading_insights?.trigger_reliability && (
               <TriggerReliabilityBadge
                 data={data.trading_insights.trigger_reliability}
@@ -187,7 +187,7 @@ function DashboardContent() {
               />
             )}
 
-            {/* 핵심 지표 카드 */}
+            {/* Key metrics cards */}
             <MetricsCards
               summary={data.summary}
               realPortfolio={data.real_portfolio || []}
@@ -219,7 +219,7 @@ function DashboardContent() {
               market={market}
             />
 
-            {/* 실전투자 포트폴리오 - 최우선 표시 */}
+            {/* Real trading portfolio - displayed first */}
             {data.real_portfolio && data.real_portfolio.length > 0 && (
               <HoldingsTable
                 holdings={data.real_portfolio}
@@ -230,7 +230,7 @@ function DashboardContent() {
               />
             )}
 
-            {/* 프리즘 시뮬레이터 */}
+            {/* Prism Simulator */}
             <HoldingsTable
               holdings={data.holdings}
               onStockClick={(stock) => handleStockClick(stock, false)}
@@ -239,7 +239,7 @@ function DashboardContent() {
               market={market}
             />
 
-            {/* 시장 지수 차트 - 하단 배치 */}
+            {/* Market index chart - placed at the bottom */}
             <PerformanceChart
               data={data.market_condition}
               prismPerformance={data.prism_performance}
@@ -261,7 +261,7 @@ function DashboardContent() {
         {activeTab === "jeoningu-lab" && market === "KR" && data.jeoningu_lab && <JeoninguLabPage data={data.jeoningu_lab} />}
       </main>
 
-      {/* 프로젝트 소개 Footer */}
+      {/* Project footer */}
       <ProjectFooter />
 
       {selectedStock && (
@@ -276,7 +276,7 @@ function DashboardContent() {
   )
 }
 
-// 메인 페이지 컴포넌트 - Suspense 경계로 래핑
+// Main page component - wrapped with Suspense boundary
 export default function Page() {
   return (
     <Suspense fallback={<LoadingSpinner />}>
