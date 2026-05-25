@@ -240,13 +240,13 @@ class USDashboardDataGenerator:
         return {col[0]: row[idx] for idx, col in enumerate(cursor.description)}
 
     def normalize_lessons(self, lessons_data) -> List[Dict]:
-        """L1/L2/L3 lessons 데이터를 일관된 구조로 정규화
+        """Normalize L1/L2/L3 lessons data into a consistent structure
 
-        L1 (상세): [{condition, action, reason, priority}] - 완전한 객체 배열
-        L2 (압축): ["문자열 교훈1", ...] 또는 [{action}] - priority 필드 누락 가능
-        L3 (최소): 더 간략한 형태
+        L1 (detailed): [{condition, action, reason, priority}] - Complete object array
+        L2 (compressed): ["lesson string 1", ...] or [{action}] - May lack priority field
+        L3 (minimal): Even simpler form
 
-        모든 형태를 {condition, action, reason, priority} 구조로 통일
+        Unify all forms into {condition, action, reason, priority} structure
         """
         if not lessons_data:
             return []
@@ -586,7 +586,7 @@ class USDashboardDataGenerator:
         try:
             cursor = conn.cursor()
 
-            # 1. trading_principles 조회 (KR/US 통합)
+            # 1. Query trading_principles (KR/US unified)
             cursor.execute("""
                 SELECT id, scope, scope_context, condition, action, reason,
                        priority, confidence, supporting_trades, is_active,
@@ -610,7 +610,7 @@ class USDashboardDataGenerator:
 
             logger.info(f"Trading principles: {len(principles)} items")
 
-            # 2. trading_journal 조회 (KR/US 통합)
+            # 2. Query trading_journal (KR/US unified)
             cursor.execute("""
                 SELECT id, ticker, company_name, trade_date, trade_type,
                        buy_price, sell_price, profit_rate, holding_days,
@@ -631,7 +631,7 @@ class USDashboardDataGenerator:
 
             logger.info(f"Trading journal: {len(journal_entries)} entries")
 
-            # 3. trading_intuitions 조회 (KR/US 통합)
+            # 3. Query trading_intuitions (KR/US unified)
             cursor.execute("""
                 SELECT id, category, condition, insight, confidence,
                        success_rate, supporting_trades, is_active, subcategory
