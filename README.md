@@ -18,7 +18,7 @@
 > 13+ specialized AI agents collaborate to detect surge stocks, generate analyst-grade reports, and execute trades automatically.
 
 <p align="center">
-  <a href="README.md">English</a> |
+  <a href="README.md">English</a>
 </p>
 
 ---
