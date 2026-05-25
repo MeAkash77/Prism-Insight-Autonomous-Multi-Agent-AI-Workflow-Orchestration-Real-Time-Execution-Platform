@@ -1,0 +1,1985 @@
+"""
+US Stock Trading Module (KIS Overseas Stock API)
+
+Provides:
+- Fixed amount purchase per stock
+- Market price buy/sell
+- Full liquidation sell
+- Portfolio management
+
+Key differences from Korean domestic trading:
+- API endpoints: /uapi/overseas-stock/ instead of /uapi/domestic-stock/
+- Exchange codes: NASD (NASDAQ), NYSE (NYSE), AMEX (AMEX)
+- TR IDs are different for overseas trading
+- Currency: USD
+- Market hours: 09:30-16:00 EST (23:30-06:00 KST next day)
+"""
+
+import asyncio
+import datetime
+import json
+import logging
+import math
+import os
+import threading
+import time
+from pathlib import Path
+from typing import Optional, Dict, List, Any
+
+import yaml
+import pytz
+
+# Path to directory where current file is located
+TRADING_DIR = Path(__file__).parent
+PROJECT_ROOT = TRADING_DIR.parent.parent
+
+# Import KIS auth from parent trading directory
+import sys
+sys.path.insert(0, str(PROJECT_ROOT / "trading"))
+import kis_auth as ka
+
+# Logging setup
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# Load configuration file (use same config as domestic)
+CONFIG_FILE = PROJECT_ROOT / "trading" / "config" / "kis_devlp.yaml"
+with open(CONFIG_FILE, encoding="UTF-8") as f:
+    _cfg = yaml.safe_load(f)
+
+# Timezones
+US_EASTERN = pytz.timezone('US/Eastern')
+KST = pytz.timezone('Asia/Seoul')
+
+
+# =============================================================================
+# Safe Type Conversion Helpers (handle empty strings from KIS API)
+# =============================================================================
+def _safe_float(value, default: float = 0.0) -> float:
+    """
+    Safely convert value to float, handling empty strings and None.
+
+    KIS API sometimes returns empty string '' instead of 0 for price fields,
+    which causes 'could not convert string to float' errors.
+
+    Args:
+        value: Value to convert (can be str, int, float, None, or '')
+        default: Default value if conversion fails
+
+    Returns:
+        float: Converted value or default
+    """
+    if value is None or value == '':
+        return default
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return default
+
+
+def _safe_int(value, default: int = 0) -> int:
+    """
+    Safely convert value to int, handling empty strings and None.
+
+    Args:
+        value: Value to convert (can be str, int, float, None, or '')
+        default: Default value if conversion fails
+
+    Returns:
+        int: Converted value or default
+    """
+    if value is None or value == '':
+        return default
+    try:
+        return int(float(value))  # Handle "123.0" string case
+    except (ValueError, TypeError):
+        return default
+
+# Exchange code mapping (for trading/portfolio APIs using OVRS_EXCG_CD)
+EXCHANGE_CODES = {
+    "NASDAQ": "NASD",
+    "NYSE": "NYSE",
+    "AMEX": "AMEX",
+    "NASD": "NASD",  # Allow direct use
+}
+
+# Price query API uses shorter exchange codes (EXCD parameter)
+PRICE_EXCHANGE_CODES = {
+    "NASD": "NAS",
+    "NYSE": "NYS",
+    "AMEX": "AMS",
+    "NAS": "NAS",
+    "NYS": "NYS",
+    "AMS": "AMS",
+}
+
+# yfinance exchange field → KIS OVRS_EXCG_CD mapping
+# This is a protocol translation table. Add new entries here when an unknown
+# yfinance exchange code is logged at ERROR level by get_exchange_code().
+_YFINANCE_TO_KIS: Dict[str, str] = {
+    "NMS": "NASD",      # NASDAQ Global Select Market
+    "NGM": "NASD",      # NASDAQ Global Market
+    "NCM": "NASD",      # NASDAQ Capital Market
+    "NasdaqGS": "NASD",
+    "NasdaqGM": "NASD",
+    "NasdaqCM": "NASD",
+    "NYQ": "NYSE",
+    "NYSE": "NYSE",
+    "ASE": "AMEX",
+    "PCX": "AMEX",      # NYSE Arca
+    "BTS": "NYSE",      # Cboe BZX Exchange (formerly BATS) — KIS treats as NYSE
+    "BATS": "NYSE",     # Cboe BZX (alternate yfinance code)
+}
+
+# Persistent ticker → KIS exchange cache.
+# Auto-populated on first yfinance lookup; survives process restarts.
+# Hand-editable — useful when a stock changes exchange or yfinance is wrong.
+_EXCHANGE_CACHE_FILE = TRADING_DIR / "data" / "exchange_cache.json"
+_EXCHANGE_CACHE_LOCK = threading.Lock()
+
+
+def _load_exchange_cache() -> Dict[str, str]:
+    """Load persistent ticker → exchange cache from disk."""
+    try:
+        if _EXCHANGE_CACHE_FILE.exists():
+            with open(_EXCHANGE_CACHE_FILE, encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    return {k.upper(): v for k, v in data.items() if isinstance(v, str)}
+                logger.warning(f"[exchange] Cache file is not a dict: {_EXCHANGE_CACHE_FILE}")
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning(f"[exchange] Failed to load cache file ({_EXCHANGE_CACHE_FILE}): {e} — starting empty")
+    return {}
+
+
+def _save_exchange_cache(cache: Dict[str, str]) -> None:
+    """Atomically write the ticker → exchange cache to disk (sorted for clean diffs)."""
+    try:
+        _EXCHANGE_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = _EXCHANGE_CACHE_FILE.with_suffix(".json.tmp")
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(cache, f, indent=2, sort_keys=True)
+            f.write("\n")
+        os.replace(tmp_path, _EXCHANGE_CACHE_FILE)
+    except OSError as e:
+        logger.warning(f"[exchange] Failed to save cache file ({_EXCHANGE_CACHE_FILE}): {e}")
+
+
+_EXCHANGE_CACHE: Dict[str, str] = _load_exchange_cache()
+
+
+def get_exchange_code(ticker: str) -> str:
+    """
+    Determine the KIS exchange code for a ticker.
+
+    Lookup order:
+        1. Persistent cache (data/exchange_cache.json) — instant
+        2. yfinance .info["exchange"] → translated via _YFINANCE_TO_KIS
+        3. Fallback to "NYSE" (NOT cached, so adding mappings retroactively works)
+
+    Returns:
+        Exchange code: "NASD", "NYSE", or "AMEX"
+    """
+    ticker_upper = ticker.upper()
+
+    cached = _EXCHANGE_CACHE.get(ticker_upper)
+    if cached:
+        return cached
+
+    exch = ""
+    try:
+        import yfinance as yf
+        info = yf.Ticker(ticker_upper).info
+        exch = info.get("exchange") or ""
+        kis_code = _YFINANCE_TO_KIS.get(exch)
+        if kis_code:
+            with _EXCHANGE_CACHE_LOCK:
+                _EXCHANGE_CACHE[ticker_upper] = kis_code
+                _save_exchange_cache(_EXCHANGE_CACHE)
+            logger.info(f"[exchange] {ticker_upper}: yfinance={exch} → KIS={kis_code} (cached)")
+            return kis_code
+    except Exception as e:
+        logger.warning(f"[exchange] yfinance lookup failed for {ticker_upper}: {e} — defaulting to NYSE")
+        return "NYSE"
+
+    # yfinance returned an exchange we don't know how to map.
+    # Loud error so the missing mapping gets noticed and added to _YFINANCE_TO_KIS.
+    # Fallback is NOT cached, so adding the mapping later picks up retroactively.
+    logger.error(
+        f"[exchange] UNMAPPED yfinance exchange '{exch}' for {ticker_upper} — defaulting to NYSE. "
+        f"Add '{exch}' to _YFINANCE_TO_KIS or override in {_EXCHANGE_CACHE_FILE.name}."
+    )
+    return "NYSE"
+
+
+class USStockTrading:
+    """US Stock Trading class using KIS Overseas Stock API"""
+
+    # Default buy amount per stock (in USD)
+    DEFAULT_BUY_AMOUNT = _cfg.get("default_unit_amount_usd", 100)  # $100 default
+    # Auto trading enabled flag
+    AUTO_TRADING = _cfg.get("auto_trading", True)
+    # Default trading environment
+    DEFAULT_MODE = _cfg.get("default_mode", "demo")
+
+    def __init__(
+        self,
+        mode: str = None,
+        buy_amount: float = None,
+        auto_trading: bool = None,
+        account_name: str = None,
+        account_index: int = None,
+        product_code: str = "01",
+    ):
+        """
+        Initialize US Stock Trading
+
+        Args:
+            mode: 'demo' (simulated) or 'real' (real trading)
+            buy_amount: Buy amount per stock in USD (default: from config)
+            auto_trading: Whether to execute auto trading
+        """
+        self.mode = mode if mode else self.DEFAULT_MODE
+        self.env = "vps" if self.mode == "demo" else "prod"
+        self.auto_trading = auto_trading if auto_trading is not None else self.AUTO_TRADING
+        self.account_index = account_index
+        self.account_config = ka.resolve_account(
+            svr=self.env,
+            product=str(product_code),
+            account_name=account_name,
+            account_index=account_index,
+            market="us",
+        )
+        self.account_name = self.account_config["name"]
+        self.account_key = self.account_config["account_key"]
+        self.account_index = account_index
+        self.product_code = self.account_config["product"]
+        default_buy_amount = float(self.account_config.get("buy_amount_usd") or self.DEFAULT_BUY_AMOUNT)
+        self.buy_amount = buy_amount if buy_amount is not None else default_buy_amount
+
+        # Authentication
+        ka.auth(
+            svr=self.env,
+            product=self.product_code,
+            account_key=self.account_key,
+        )
+
+        try:
+            self.trenv = ka.getTREnv()
+        except RuntimeError as e:
+            print("❌ KIS API authentication failed!")
+            print(f"Mode: {self.mode}, Error: {e}")
+            print("📋 Please check kis_devlp.yaml settings.")
+            raise RuntimeError(f"{self.mode} mode authentication failed") from e
+
+        # Async setup
+        self._global_lock = asyncio.Lock()
+        self._semaphore = asyncio.Semaphore(3)
+        self._stock_locks = {}
+
+        logger.info(f"USStockTrading initialized (Async Enabled)")
+        logger.info(f"Mode: {mode}, Buy Amount: ${self.buy_amount:,.2f} USD")
+        logger.info(f"Account: {self.account_name} ({ka.mask_account_number(self.trenv.my_acct)}-{self.trenv.my_prod})")
+
+    def _activate_account(self):
+        """Ensure the shared KIS environment matches this trader's account."""
+        ka.changeTREnv(
+            self.trenv.my_token,
+            svr=self.env,
+            product=self.trenv.my_prod,
+            account_key=self.account_key,
+        )
+
+    def _request(self, api_url: str, tr_id: str, params: Dict[str, Any], **kwargs):
+        with ka.get_trading_env_lock():
+            self._activate_account()
+            return ka._url_fetch(api_url, tr_id, "", params, **kwargs)
+
+    def _probe_exchange(self, ticker: str) -> Optional[str]:
+        """
+        Probe KIS price API across NAS/NYS/AMS to discover which one holds this ticker.
+
+        KIS classifies all US stocks into NASD/NYSE/AMEX regardless of actual listing
+        venue (Cboe BZX, IEX, NYSE Arca, etc.). The price API returns empty data
+        (last='' and base='') when queried with the wrong exchange code, so we probe
+        each candidate until one returns a valid price.
+
+        Returns:
+            KIS exchange code ("NASD"/"NYSE"/"AMEX") or None if not found.
+        """
+        api_url = "/uapi/overseas-price/v1/quotations/price"
+        tr_id = "HHDFS00000300"
+        ticker_upper = ticker.upper()
+
+        # Probe order: NASD first (covers majority), then NYSE, then AMEX.
+        for kis_code, price_excd in (("NASD", "NAS"), ("NYSE", "NYS"), ("AMEX", "AMS")):
+            params = {"AUTH": "", "EXCD": price_excd, "SYMB": ticker_upper}
+            try:
+                res = self._request(api_url, tr_id, params)
+                if res.isOK():
+                    data = res.getBody().output
+                    last = _safe_float(data.get("last"))
+                    base = _safe_float(data.get("base"))
+                    if last > 0 or base > 0:
+                        return kis_code
+            except Exception as e:
+                logger.warning(f"[exchange] KIS probe error {ticker_upper}/{price_excd}: {e}")
+
+        return None
+
+    def _resolve_exchange(self, ticker: str) -> str:
+        """
+        Resolve KIS exchange code for a ticker — KIS-authoritative.
+
+        Lookup order:
+            1. Persistent cache (data/exchange_cache.json) — instant
+            2. Probe KIS price API across NAS/NYS/AMS — authoritative
+            3. Fallback to "NYSE" (NOT cached, so a later success picks up retroactively)
+        """
+        ticker_upper = ticker.upper()
+
+        cached = _EXCHANGE_CACHE.get(ticker_upper)
+        if cached:
+            return cached
+
+        kis_code = self._probe_exchange(ticker_upper)
+        if kis_code:
+            with _EXCHANGE_CACHE_LOCK:
+                _EXCHANGE_CACHE[ticker_upper] = kis_code
+                _save_exchange_cache(_EXCHANGE_CACHE)
+            logger.info(f"[exchange] {ticker_upper} resolved via KIS probe → {kis_code} (cached)")
+            return kis_code
+
+        logger.error(
+            f"[exchange] KIS probe found no match for {ticker_upper} on NAS/NYS/AMS — "
+            f"defaulting to NYSE. Stock may not be in KIS's overseas trading universe."
+        )
+        return "NYSE"
+
+    def get_current_price(self, ticker: str, exchange: str = None) -> Optional[Dict[str, Any]]:
+        """
+        Get current market price for US stock
+
+        Args:
+            ticker: Stock ticker symbol (e.g., "AAPL", "MSFT")
+            exchange: Exchange code (NASD, NYSE, AMEX) - auto-detected if not provided
+
+        Returns:
+            {
+                'ticker': 'AAPL',
+                'stock_name': 'APPLE INC',
+                'current_price': 185.50,
+                'change_rate': 1.25,
+                'volume': 45000000,
+                'exchange': 'NASD'
+            }
+        """
+        if exchange is None:
+            exchange = self._resolve_exchange(ticker)
+        else:
+            exchange = EXCHANGE_CODES.get(exchange.upper(), exchange)
+
+        api_url = "/uapi/overseas-price/v1/quotations/price"
+        tr_id = "HHDFS00000300"
+
+        # Price API uses shorter exchange codes (NAS/NYS/AMS)
+        price_excd = PRICE_EXCHANGE_CODES.get(exchange, exchange)
+
+        params = {
+            "AUTH": "",
+            "EXCD": price_excd,
+            "SYMB": ticker.upper()
+        }
+
+        try:
+            res = self._request(api_url, tr_id, params)
+
+            if res.isOK():
+                data = res.getBody().output
+
+                # Use safe conversion helpers to handle empty strings from API
+                current_price = _safe_float(data.get('last'))
+
+                # When market is closed, 'last' is empty; fall back to 'base' (previous day close)
+                if current_price <= 0:
+                    base_price = _safe_float(data.get('base'))
+                    if base_price > 0:
+                        logger.info(f"[{ticker}] Market closed - 'last' empty, using base price ${base_price:.2f}")
+                        current_price = base_price
+                    else:
+                        logger.warning(f"[{ticker}] Invalid price received: last='{data.get('last')}', base='{data.get('base')}'")
+                        return None
+
+                result = {
+                    'ticker': ticker.upper(),
+                    'stock_name': data.get('name', ''),
+                    'current_price': current_price,
+                    'change_rate': _safe_float(data.get('rate')),
+                    'volume': _safe_int(data.get('tvol')),
+                    'exchange': exchange
+                }
+
+                logger.info(f"[{ticker}] Current price: ${result['current_price']:.2f} ({result['change_rate']:+.2f}%)")
+                return result
+            else:
+                logger.error(f"Price query failed: {res.getErrorCode()} - {res.getErrorMessage()}")
+                return None
+
+        except Exception as e:
+            logger.error(f"Error getting price: {str(e)}")
+            return None
+
+    def calculate_buy_quantity(self, ticker: str, buy_amount: float = None,
+                               exchange: str = None) -> int:
+        """
+        Calculate buyable quantity
+
+        Args:
+            ticker: Stock ticker symbol
+            buy_amount: Buy amount in USD (default: class setting)
+            exchange: Exchange code
+
+        Returns:
+            Buyable quantity (0 if cannot buy)
+        """
+        amount = buy_amount if buy_amount else self.buy_amount
+
+        # Get current price
+        price_info = self.get_current_price(ticker, exchange)
+        if not price_info:
+            return 0
+
+        current_price = price_info['current_price']
+
+        # Safety check for division by zero
+        if current_price <= 0:
+            logger.error(f"[{ticker}] Invalid current price: ${current_price}")
+            return 0
+
+        # Calculate quantity (floor)
+        quantity = math.floor(amount / current_price)
+
+        if quantity == 0:
+            logger.warning(f"[{ticker}] Price ${current_price:.2f} > Amount ${amount:.2f} - Cannot buy")
+        else:
+            total = quantity * current_price
+            logger.info(f"[{ticker}] Buyable: {quantity} shares x ${current_price:.2f} = ${total:.2f}")
+
+        return quantity
+
+    def buy_market_price(self, ticker: str, buy_amount: float = None,
+                         exchange: str = None) -> Dict[str, Any]:
+        """
+        Market price buy for US stock
+
+        Args:
+            ticker: Stock ticker symbol
+            buy_amount: Buy amount in USD
+            exchange: Exchange code
+
+        Returns:
+            {
+                'success': bool,
+                'order_no': str,
+                'ticker': str,
+                'quantity': int,
+                'message': str
+            }
+        """
+        if not self.auto_trading:
+            return {
+                'success': False,
+                'order_no': None,
+                'ticker': ticker,
+                'quantity': 0,
+                'message': 'Auto trading is disabled (AUTO_TRADING=False)'
+            }
+
+        if exchange is None:
+            exchange = self._resolve_exchange(ticker)
+        else:
+            exchange = EXCHANGE_CODES.get(exchange.upper(), exchange)
+
+        # Calculate buy quantity
+        buy_quantity = self.calculate_buy_quantity(ticker, buy_amount, exchange)
+
+        if buy_quantity == 0:
+            return {
+                'success': False,
+                'order_no': None,
+                'ticker': ticker,
+                'quantity': 0,
+                'message': 'Buy quantity is 0 (price higher than buy amount)'
+            }
+
+        # Execute buy order
+        api_url = "/uapi/overseas-stock/v1/trading/order"
+
+        # TR ID for overseas stock buy
+        if self.mode == "real":
+            tr_id = "TTTT1002U"  # Real overseas buy
+        else:
+            tr_id = "VTTT1002U"  # Demo overseas buy
+
+        params = {
+            "CANO": self.trenv.my_acct,
+            "ACNT_PRDT_CD": self.trenv.my_prod,
+            "OVRS_EXCG_CD": exchange,
+            "PDNO": ticker.upper(),
+            "ORD_QTY": str(buy_quantity),
+            "OVRS_ORD_UNPR": "0",  # Market order price = 0
+            "ORD_SVR_DVSN_CD": "0",
+            "ORD_DVSN": "01"   # Market order (시장가)
+        }
+
+        try:
+            res = self._request(api_url, tr_id, params, postFlag=True)
+
+            if res.isOK():
+                output = res.getBody().output
+                order_no = output.get('ODNO', '')
+
+                logger.info(f"[{ticker}] Market buy order success: {buy_quantity} shares, Order#: {order_no}")
+
+                return {
+                    'success': True,
+                    'order_no': order_no,
+                    'ticker': ticker,
+                    'quantity': buy_quantity,
+                    'message': f'Market buy order completed ({buy_quantity} shares)'
+                }
+            else:
+                error_msg = f"{res.getErrorCode()} - {res.getErrorMessage()}"
+                logger.error(f"Buy order failed: {error_msg}")
+
+                return {
+                    'success': False,
+                    'order_no': None,
+                    'ticker': ticker,
+                    'quantity': buy_quantity,
+                    'message': f'Buy order failed: {error_msg}'
+                }
+
+        except Exception as e:
+            logger.error(f"Error during buy order: {str(e)}")
+            return {
+                'success': False,
+                'order_no': None,
+                'ticker': ticker,
+                'quantity': buy_quantity,
+                'message': f'Buy order error: {str(e)}'
+            }
+
+    def buy_limit_price(self, ticker: str, limit_price: float, buy_amount: float = None,
+                        exchange: str = None) -> Dict[str, Any]:
+        """
+        Limit price buy for US stock
+
+        Args:
+            ticker: Stock ticker symbol
+            limit_price: Limit price in USD
+            buy_amount: Buy amount in USD
+            exchange: Exchange code
+
+        Returns:
+            Order result dict
+        """
+        if not self.auto_trading:
+            return {
+                'success': False,
+                'order_no': None,
+                'ticker': ticker,
+                'quantity': 0,
+                'limit_price': limit_price,
+                'message': 'Auto trading is disabled (AUTO_TRADING=False)'
+            }
+
+        if exchange is None:
+            exchange = self._resolve_exchange(ticker)
+        else:
+            exchange = EXCHANGE_CODES.get(exchange.upper(), exchange)
+
+        amount = buy_amount if buy_amount else self.buy_amount
+
+        # Calculate quantity based on limit price
+        buy_quantity = math.floor(amount / limit_price)
+
+        if buy_quantity == 0:
+            return {
+                'success': False,
+                'order_no': None,
+                'ticker': ticker,
+                'quantity': 0,
+                'limit_price': limit_price,
+                'message': f'Buy quantity is 0 (limit ${limit_price:.2f} > amount ${amount:.2f})'
+            }
+
+        # Execute limit buy order
+        api_url = "/uapi/overseas-stock/v1/trading/order"
+
+        if self.mode == "real":
+            tr_id = "TTTT1002U"
+        else:
+            tr_id = "VTTT1002U"
+
+        params = {
+            "CANO": self.trenv.my_acct,
+            "ACNT_PRDT_CD": self.trenv.my_prod,
+            "OVRS_EXCG_CD": exchange,
+            "PDNO": ticker.upper(),
+            "ORD_QTY": str(buy_quantity),
+            "OVRS_ORD_UNPR": f"{limit_price:.2f}",
+            "ORD_SVR_DVSN_CD": "0",
+            "ORD_DVSN": "00"  # Limit order
+        }
+
+        try:
+            res = self._request(api_url, tr_id, params, postFlag=True)
+
+            if res.isOK():
+                output = res.getBody().output
+                order_no = output.get('ODNO', '')
+
+                logger.info(f"[{ticker}] Limit buy order success: {buy_quantity} shares x ${limit_price:.2f}, Order#: {order_no}")
+
+                return {
+                    'success': True,
+                    'order_no': order_no,
+                    'ticker': ticker,
+                    'quantity': buy_quantity,
+                    'limit_price': limit_price,
+                    'message': f'Limit buy order completed ({buy_quantity} shares x ${limit_price:.2f})'
+                }
+            else:
+                error_code = res.getErrorCode()
+                error_msg = f"{error_code} - {res.getErrorMessage()}"
+                if error_code == "APBK0656":
+                    logger.error(f"Limit buy order failed: {error_msg} (exchange={exchange}, ticker={ticker.upper()}) — stock may not be in KIS universe for this exchange")
+                else:
+                    logger.error(f"Limit buy order failed: {error_msg} (exchange={exchange})")
+
+                return {
+                    'success': False,
+                    'order_no': None,
+                    'ticker': ticker,
+                    'quantity': buy_quantity,
+                    'limit_price': limit_price,
+                    'message': f'Buy order failed: {error_msg}'
+                }
+
+        except Exception as e:
+            logger.error(f"Error during limit buy: {str(e)}")
+            return {
+                'success': False,
+                'order_no': None,
+                'ticker': ticker,
+                'quantity': buy_quantity,
+                'limit_price': limit_price,
+                'message': f'Buy order error: {str(e)}'
+            }
+
+    def get_holding_quantity(self, ticker: str) -> int:
+        """
+        Get holding quantity for a specific ticker
+
+        Args:
+            ticker: Stock ticker symbol
+
+        Returns:
+            Holding quantity (0 if not held)
+        """
+        portfolio = self.get_portfolio()
+
+        for stock in portfolio:
+            if stock['ticker'].upper() == ticker.upper():
+                return stock['quantity']
+
+        return 0
+
+    def sell_all_market_price(self, ticker: str, exchange: str = None,
+                              limit_price: float = None) -> Dict[str, Any]:
+        """
+        Sell all holdings at current market price (limit order at current price).
+
+        KIS TTTT1006U does not support ORD_DVSN "01" (market order) for sell.
+        Valid values: 00=limit, 31=MOO, 32=LOO, 33=MOC, 34=LOC.
+        We use ORD_DVSN "00" (limit) with the current price, which fills
+        immediately when the market is open.
+
+        Args:
+            ticker: Stock ticker symbol
+            exchange: Exchange code
+            limit_price: Current price to use as limit price. If not provided,
+                         fetched automatically.
+
+        Returns:
+            Order result dict
+        """
+        if not self.auto_trading:
+            return {
+                'success': False,
+                'order_no': None,
+                'ticker': ticker,
+                'quantity': 0,
+                'message': 'Auto trading is disabled (AUTO_TRADING=False)'
+            }
+
+        if exchange is None:
+            exchange = self._resolve_exchange(ticker)
+        else:
+            exchange = EXCHANGE_CODES.get(exchange.upper(), exchange)
+
+        # Check holding quantity
+        quantity = self.get_holding_quantity(ticker)
+
+        if quantity == 0:
+            return {
+                'success': False,
+                'order_no': None,
+                'ticker': ticker,
+                'quantity': 0,
+                'message': 'No holdings to sell'
+            }
+
+        # Fetch current price if not provided
+        if not limit_price or limit_price <= 0:
+            price_info = self.get_current_price(ticker, exchange)
+            limit_price = price_info['current_price'] if price_info else 0.0
+            if limit_price <= 0:
+                return {
+                    'success': False,
+                    'order_no': None,
+                    'ticker': ticker,
+                    'quantity': 0,
+                    'message': 'Failed to fetch current price for sell order'
+                }
+
+        # Execute sell order
+        api_url = "/uapi/overseas-stock/v1/trading/order"
+
+        if self.mode == "real":
+            tr_id = "TTTT1006U"  # Real overseas sell
+        else:
+            tr_id = "VTTT1001U"  # Demo overseas sell
+
+        params = {
+            "CANO": self.trenv.my_acct,
+            "ACNT_PRDT_CD": self.trenv.my_prod,
+            "OVRS_EXCG_CD": exchange,
+            "PDNO": ticker.upper(),
+            "ORD_QTY": str(quantity),
+            "OVRS_ORD_UNPR": f"{limit_price:.2f}",  # KIS TTTT1006U: no market order (ORD_DVSN "01"), use limit at current price
+            "ORD_SVR_DVSN_CD": "0",
+            "SLL_TYPE": "00",  # Sell type
+            "ORD_DVSN": "00"   # Limit order (지정가) — TTTT1006U does not support "01"
+        }
+
+        try:
+            res = self._request(api_url, tr_id, params, postFlag=True)
+
+            if res.isOK():
+                output = res.getBody().output
+                order_no = output.get('ODNO', '')
+
+                logger.info(f"[{ticker}] Market sell order success: {quantity} shares, Order#: {order_no}")
+
+                return {
+                    'success': True,
+                    'order_no': order_no,
+                    'ticker': ticker,
+                    'quantity': quantity,
+                    'message': f'Market sell order completed ({quantity} shares)'
+                }
+            else:
+                error_msg = f"{res.getErrorCode()} - {res.getErrorMessage()}"
+                logger.error(f"Sell order failed: {error_msg}")
+
+                return {
+                    'success': False,
+                    'order_no': None,
+                    'ticker': ticker,
+                    'quantity': quantity,
+                    'message': f'Sell order failed: {error_msg}'
+                }
+
+        except Exception as e:
+            logger.error(f"Error during sell order: {str(e)}")
+            return {
+                'success': False,
+                'order_no': None,
+                'ticker': ticker,
+                'quantity': quantity,
+                'message': f'Sell order error: {str(e)}'
+            }
+
+    def is_market_open(self) -> bool:
+        """
+        Check if US market is currently open
+
+        Returns:
+            True if market is open, False otherwise
+        """
+        now_et = datetime.datetime.now(US_EASTERN)
+        current_time = now_et.time()
+
+        # US market hours: 09:30 - 16:00 ET
+        market_open = datetime.time(9, 30)
+        market_close = datetime.time(16, 0)
+
+        # Check if it's a weekday
+        if now_et.weekday() >= 5:  # Saturday = 5, Sunday = 6
+            return False
+
+        return market_open <= current_time <= market_close
+
+    def is_reserved_order_available(self) -> bool:
+        """
+        Check if reserved order is available (Korean time window)
+
+        Reserved order available: 10:00 ~ 23:20 KST (winter) / 10:00 ~ 22:20 KST (summer)
+        System maintenance: 16:30 ~ 16:45 KST (not available)
+
+        Returns:
+            True if reserved order can be placed, False otherwise
+        """
+        import pytz
+        now_kst = datetime.datetime.now(KST)
+        current_time = now_kst.time()
+
+        # System maintenance window: 16:30 ~ 16:45
+        if datetime.time(16, 30) <= current_time <= datetime.time(16, 45):
+            return False
+
+        # Reserved order window: 10:00 ~ 23:20 (using conservative winter time)
+        resv_start = datetime.time(10, 0)
+        resv_end = datetime.time(23, 20)
+
+        return resv_start <= current_time <= resv_end
+
+    def _queue_pending_order(self, ticker: str, order_type: str, limit_price: float,
+                             buy_amount: float = None, exchange: str = None) -> Dict[str, Any]:
+        """
+        Queue a reserved order for later batch execution.
+
+        When KIS API reserved order window is closed (before 10:00 KST),
+        saves the order to us_pending_orders table for processing by
+        us_pending_order_batch.py (cron at 10:05 KST).
+
+        Args:
+            ticker: Stock ticker symbol
+            order_type: 'buy' or 'sell'
+            limit_price: Limit price in USD
+            buy_amount: Buy amount in USD (buy only)
+            exchange: Exchange code (NASD, NYSE, AMEX)
+
+        Returns:
+            Order result dict with status='queued'
+        """
+        import sqlite3
+        from pathlib import Path
+
+        try:
+            db_path = Path(__file__).resolve().parent.parent.parent / "stock_tracking_db.sqlite"
+            conn = sqlite3.connect(str(db_path))
+            cursor = conn.cursor()
+
+            # Ensure table exists
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS us_pending_orders (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    account_key TEXT NOT NULL,
+                    account_name TEXT,
+                    product_code TEXT,
+                    mode TEXT,
+                    ticker TEXT NOT NULL,
+                    order_type TEXT NOT NULL,
+                    limit_price REAL NOT NULL,
+                    buy_amount REAL,
+                    exchange TEXT,
+                    trigger_type TEXT,
+                    trigger_mode TEXT,
+                    status TEXT DEFAULT 'pending',
+                    failure_reason TEXT,
+                    created_at TEXT NOT NULL,
+                    executed_at TEXT,
+                    order_result TEXT
+                )
+            """)
+
+            now_kst = datetime.datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')
+            cursor.execute(
+                """INSERT INTO us_pending_orders
+                   (account_key, account_name, product_code, mode, ticker, order_type, limit_price, buy_amount, exchange, status, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)""",
+                (
+                    self.account_key,
+                    self.account_name,
+                    self.product_code,
+                    self.mode,
+                    ticker.upper(),
+                    order_type,
+                    limit_price,
+                    buy_amount,
+                    exchange,
+                    now_kst,
+                )
+            )
+            conn.commit()
+            pending_id = cursor.lastrowid
+            conn.close()
+
+            logger.info(f"[{ticker}] Reserved order queued (id={pending_id}, {order_type}, ${limit_price:.2f}) - will execute at 10:05 KST")
+
+            return {
+                'success': True,
+                'order_no': f'PENDING-{pending_id}',
+                'ticker': ticker,
+                'quantity': 0,
+                'limit_price': limit_price,
+                'order_type': f'queued_{order_type}',
+                'message': f'Reserved {order_type} order queued (outside KIS time window). Will execute at 10:05 KST.'
+            }
+
+        except Exception as e:
+            logger.error(f"[{ticker}] Failed to queue pending order: {e}")
+            return {
+                'success': False,
+                'order_no': None,
+                'ticker': ticker,
+                'quantity': 0,
+                'limit_price': limit_price,
+                'message': f'Failed to queue pending order: {str(e)}'
+            }
+
+    def buy_reserved_order(self, ticker: str, limit_price: float, buy_amount: float = None,
+                           exchange: str = None) -> Dict[str, Any]:
+        """
+        Reserved order buy for US stock (executed at next market open)
+        Reserved buy order - automatically executed at next market open
+
+        Note: US reserved orders only support LIMIT orders (only limit price orders allowed)
+
+        Args:
+            ticker: Stock ticker symbol
+            limit_price: Limit price in USD (REQUIRED - market order not supported)
+            buy_amount: Buy amount in USD
+            exchange: Exchange code
+
+        Returns:
+            Order result dict
+        """
+        if not self.auto_trading:
+            return {
+                'success': False,
+                'order_no': None,
+                'ticker': ticker,
+                'quantity': 0,
+                'limit_price': limit_price,
+                'message': 'Auto trading is disabled (AUTO_TRADING=False)'
+            }
+
+        if not limit_price or limit_price <= 0:
+            return {
+                'success': False,
+                'order_no': None,
+                'ticker': ticker,
+                'quantity': 0,
+                'limit_price': 0,
+                'message': 'Limit price is required for US reserved orders (market order not supported)'
+            }
+
+        if exchange is None:
+            exchange = self._resolve_exchange(ticker)
+        else:
+            exchange = EXCHANGE_CODES.get(exchange.upper(), exchange)
+
+        amount = buy_amount if buy_amount else self.buy_amount
+
+        if not self.is_reserved_order_available():
+            # Queue the order for later batch execution (us_pending_order_batch.py at 10:05 KST)
+            return self._queue_pending_order(
+                ticker=ticker, order_type='buy', limit_price=limit_price,
+                buy_amount=amount, exchange=exchange
+            )
+
+        # Calculate quantity based on limit price
+        buy_quantity = math.floor(amount / limit_price)
+
+        if buy_quantity == 0:
+            return {
+                'success': False,
+                'order_no': None,
+                'ticker': ticker,
+                'quantity': 0,
+                'limit_price': limit_price,
+                'message': f'Buy quantity is 0 (limit ${limit_price:.2f} > amount ${amount:.2f})'
+            }
+
+        # Reserved order API
+        api_url = "/uapi/overseas-stock/v1/trading/order-resv"
+
+        # TR ID for US reserved order buy
+        if self.mode == "real":
+            tr_id = "TTTT3014U"  # Real US reserved buy
+        else:
+            tr_id = "VTTT3014U"  # Demo US reserved buy
+
+        params = {
+            "CANO": self.trenv.my_acct,
+            "ACNT_PRDT_CD": self.trenv.my_prod,
+            "OVRS_EXCG_CD": exchange,
+            "PDNO": ticker.upper(),
+            "FT_ORD_QTY": str(int(buy_quantity)),  # Must be integer string for KIS API
+            "FT_ORD_UNPR3": f"{limit_price:.2f}",
+            "ORD_SVR_DVSN_CD": "0"
+        }
+
+        try:
+            res = self._request(api_url, tr_id, params, postFlag=True)
+
+            if res.isOK():
+                output = res.getBody().output
+                order_no = output.get('ODNO', '') or output.get('RSVN_ORD_SEQ', '')
+
+                logger.info(f"[{ticker}] Reserved buy order success: {buy_quantity} shares x ${limit_price:.2f}, Order#: {order_no}")
+
+                return {
+                    'success': True,
+                    'order_no': order_no,
+                    'ticker': ticker,
+                    'quantity': buy_quantity,
+                    'limit_price': limit_price,
+                    'order_type': 'reserved_limit',
+                    'message': f'Reserved buy order completed ({buy_quantity} shares x ${limit_price:.2f})'
+                }
+            else:
+                error_msg = f"{res.getErrorCode()} - {res.getErrorMessage()}"
+                logger.error(f"Reserved buy order failed: {error_msg}")
+
+                return {
+                    'success': False,
+                    'order_no': None,
+                    'ticker': ticker,
+                    'quantity': buy_quantity,
+                    'limit_price': limit_price,
+                    'message': f'Reserved buy order failed: {error_msg}'
+                }
+
+        except Exception as e:
+            logger.error(f"Error during reserved buy order: {str(e)}")
+            return {
+                'success': False,
+                'order_no': None,
+                'ticker': ticker,
+                'quantity': buy_quantity,
+                'limit_price': limit_price,
+                'message': f'Reserved buy order error: {str(e)}'
+            }
+
+    def sell_reserved_order(self, ticker: str, limit_price: float = None,
+                            use_moo: bool = False, exchange: str = None) -> Dict[str, Any]:
+        """
+        Reserved order sell for US stock (executed at next market open)
+        Reserved sell order - automatically executed at next market open
+
+        Note: US reserved sell orders support LIMIT or MOO (Market On Open)
+
+        Args:
+            ticker: Stock ticker symbol
+            limit_price: Limit price in USD (required if use_moo is False)
+            use_moo: Use Market On Open order (default: False)
+            exchange: Exchange code
+
+        Returns:
+            Order result dict
+        """
+        if not self.auto_trading:
+            return {
+                'success': False,
+                'order_no': None,
+                'ticker': ticker,
+                'quantity': 0,
+                'message': 'Auto trading is disabled (AUTO_TRADING=False)'
+            }
+
+        if not use_moo and (not limit_price or limit_price <= 0):
+            return {
+                'success': False,
+                'order_no': None,
+                'ticker': ticker,
+                'quantity': 0,
+                'message': 'Limit price is required for reserved sell (or use use_moo=True for Market On Open)'
+            }
+
+        if exchange is None:
+            exchange = self._resolve_exchange(ticker)
+        else:
+            exchange = EXCHANGE_CODES.get(exchange.upper(), exchange)
+
+        if not self.is_reserved_order_available():
+            # Queue the order for later batch execution (us_pending_order_batch.py at 10:05 KST)
+            return self._queue_pending_order(
+                ticker=ticker, order_type='sell', limit_price=limit_price or 0,
+                buy_amount=None, exchange=exchange
+            )
+
+        # Check holding quantity
+        quantity = self.get_holding_quantity(ticker)
+
+        if quantity == 0:
+            return {
+                'success': False,
+                'order_no': None,
+                'ticker': ticker,
+                'quantity': 0,
+                'message': 'No holdings to sell'
+            }
+
+        # Reserved order API
+        api_url = "/uapi/overseas-stock/v1/trading/order-resv"
+
+        # TR ID for US reserved order sell
+        if self.mode == "real":
+            tr_id = "TTTT3016U"  # Real US reserved sell
+        else:
+            tr_id = "VTTT3016U"  # Demo US reserved sell
+
+        # Set price based on order type
+        if use_moo:
+            order_price = "0"
+            order_type_str = "MOO (Market On Open)"
+        else:
+            order_price = f"{limit_price:.2f}"
+            order_type_str = f"Limit ${limit_price:.2f}"
+
+        params = {
+            "CANO": self.trenv.my_acct,
+            "ACNT_PRDT_CD": self.trenv.my_prod,
+            "OVRS_EXCG_CD": exchange,
+            "PDNO": ticker.upper(),
+            "FT_ORD_QTY": str(int(quantity)),  # Must be integer string for KIS API
+            "FT_ORD_UNPR3": order_price,
+            "ORD_SVR_DVSN_CD": "0"
+        }
+
+        try:
+            res = self._request(api_url, tr_id, params, postFlag=True)
+
+            if res.isOK():
+                output = res.getBody().output
+                order_no = output.get('ODNO', '') or output.get('RSVN_ORD_SEQ', '')
+
+                logger.info(f"[{ticker}] Reserved sell order success: {quantity} shares, {order_type_str}, Order#: {order_no}")
+
+                return {
+                    'success': True,
+                    'order_no': order_no,
+                    'ticker': ticker,
+                    'quantity': quantity,
+                    'limit_price': limit_price if not use_moo else None,
+                    'order_type': 'reserved_moo' if use_moo else 'reserved_limit',
+                    'message': f'Reserved sell order completed ({quantity} shares, {order_type_str})'
+                }
+            else:
+                error_msg = f"{res.getErrorCode()} - {res.getErrorMessage()}"
+                logger.error(f"Reserved sell order failed: {error_msg}")
+
+                return {
+                    'success': False,
+                    'order_no': None,
+                    'ticker': ticker,
+                    'quantity': quantity,
+                    'message': f'Reserved sell order failed: {error_msg}'
+                }
+
+        except Exception as e:
+            logger.error(f"Error during reserved sell order: {str(e)}")
+            return {
+                'success': False,
+                'order_no': None,
+                'ticker': ticker,
+                'quantity': quantity,
+                'message': f'Reserved sell order error: {str(e)}'
+            }
+
+    def smart_buy(self, ticker: str, buy_amount: float = None,
+                  exchange: str = None, limit_price: float = None) -> Dict[str, Any]:
+        """
+        Smart buy - automatically choose best method based on market hours
+
+        - Market open: Execute market price buy immediately
+        - Market closed + limit_price provided: Place reserved order (limit price reserved order)
+        - Market closed + no limit_price: Return error (reserved order requires limit price)
+
+        Args:
+            ticker: Stock ticker symbol
+            buy_amount: Buy amount in USD
+            exchange: Exchange code
+            limit_price: Limit price for reserved order when market is closed
+
+        Returns:
+            Order result dict
+        """
+        if not self.auto_trading:
+            return {
+                'success': False,
+                'order_no': None,
+                'ticker': ticker,
+                'quantity': 0,
+                'message': 'Auto trading is disabled (AUTO_TRADING=False)'
+            }
+
+        if self.is_market_open():
+            # US stocks do NOT support market price buy (시장가 매수).
+            # KIS API TTTT1002U ORD_DVSN "00" = limit price (지정가), not market price.
+            # Sending OVRS_ORD_UNPR "0" causes APBK1507 error.
+            # Always use limit price buy with the provided price.
+            if limit_price and limit_price > 0:
+                logger.info(f"[{ticker}] Market is open - executing limit buy @ ${limit_price:.2f}")
+                return self.buy_limit_price(ticker, limit_price, buy_amount, exchange)
+            else:
+                logger.warning(f"[{ticker}] Market is open but no limit_price provided - cannot execute buy")
+                return {
+                    'success': False,
+                    'order_no': None,
+                    'ticker': ticker,
+                    'quantity': 0,
+                    'message': 'US stocks require limit_price for buy orders (no market price buy supported)'
+                }
+        else:
+            # Market is closed - use reserved order if limit_price provided
+            if limit_price and limit_price > 0:
+                logger.info(f"[{ticker}] Market is closed - placing reserved order (limit: ${limit_price:.2f})")
+                return self.buy_reserved_order(ticker, limit_price, buy_amount, exchange)
+            else:
+                logger.warning(f"[{ticker}] Market is closed and no limit_price provided - cannot place reserved order")
+                return {
+                    'success': False,
+                    'order_no': None,
+                    'ticker': ticker,
+                    'quantity': 0,
+                    'message': 'US market is closed. Provide limit_price for reserved order.'
+                }
+
+    def smart_sell_all(self, ticker: str, exchange: str = None,
+                       limit_price: float = None, use_moo: bool = False) -> Dict[str, Any]:
+        """
+        Smart sell - automatically choose best method based on market hours
+
+        - Market open: Execute market price sell immediately
+        - Market closed + limit_price provided: Place reserved order (limit price reserved order)
+        - Market closed + use_moo=True: Place reserved MOO order (market price reserved order)
+        - Market closed + no limit_price + no use_moo: Return error
+
+        Args:
+            ticker: Stock ticker symbol
+            exchange: Exchange code
+            limit_price: Limit price for reserved order when market is closed
+            use_moo: Use Market On Open for reserved order (default: False)
+
+        Returns:
+            Order result dict
+        """
+        if not self.auto_trading:
+            return {
+                'success': False,
+                'order_no': None,
+                'ticker': ticker,
+                'quantity': 0,
+                'message': 'Auto trading is disabled (AUTO_TRADING=False)'
+            }
+
+        if self.is_market_open():
+            logger.info(f"[{ticker}] Market is open - executing market sell")
+            return self.sell_all_market_price(ticker, exchange, limit_price=limit_price)
+        else:
+            # Market is closed - use reserved order
+            if limit_price and limit_price > 0:
+                logger.info(f"[{ticker}] Market is closed - placing reserved sell order (limit: ${limit_price:.2f})")
+                return self.sell_reserved_order(ticker, limit_price, use_moo=False, exchange=exchange)
+            elif use_moo:
+                logger.info(f"[{ticker}] Market is closed - placing reserved MOO sell order")
+                return self.sell_reserved_order(ticker, limit_price=None, use_moo=True, exchange=exchange)
+            else:
+                logger.warning(f"[{ticker}] Market is closed and no limit_price/use_moo provided")
+                return {
+                    'success': False,
+                    'order_no': None,
+                    'ticker': ticker,
+                    'quantity': 0,
+                    'message': 'US market is closed. Provide limit_price or use_moo=True for reserved order.'
+                }
+
+    async def _get_stock_lock(self, ticker: str) -> asyncio.Lock:
+        """Get per-stock lock (prevent concurrent trades on same stock)"""
+        if ticker not in self._stock_locks:
+            self._stock_locks[ticker] = asyncio.Lock()
+        return self._stock_locks[ticker]
+
+    async def async_buy_stock(self, ticker: str, buy_amount: Optional[float] = None,
+                              exchange: str = None, timeout: float = 30.0,
+                              limit_price: Optional[float] = None) -> Dict[str, Any]:
+        """
+        Async buy API with timeout
+
+        Args:
+            ticker: Stock ticker symbol
+            buy_amount: Buy amount in USD
+            exchange: Exchange code
+            timeout: Timeout in seconds
+            limit_price: Limit price for reserved order when market is closed
+
+        Returns:
+            Order result dict
+        """
+        try:
+            return await asyncio.wait_for(
+                self._execute_buy_stock(ticker, buy_amount, exchange, limit_price),
+                timeout=timeout
+            )
+        except asyncio.TimeoutError:
+            return {
+                'success': False,
+                'ticker': ticker,
+                'current_price': 0,
+                'quantity': 0,
+                'total_amount': 0,
+                'order_no': None,
+                'message': f'Buy request timeout ({timeout}s)',
+                'timestamp': datetime.datetime.now().isoformat()
+            }
+
+    async def _execute_buy_stock(self, ticker: str, buy_amount: float = None,
+                                 exchange: str = None, limit_price: float = None) -> Dict[str, Any]:
+        """Execute buy stock logic"""
+        amount = buy_amount if buy_amount else self.buy_amount
+
+        result = {
+            'success': False,
+            'ticker': ticker,
+            'current_price': 0,
+            'quantity': 0,
+            'total_amount': 0,
+            'order_no': None,
+            'message': '',
+            'timestamp': datetime.datetime.now().isoformat()
+        }
+
+        stock_lock = await self._get_stock_lock(ticker)
+
+        async with stock_lock:
+            async with self._semaphore:
+                async with self._global_lock:
+                    try:
+                        logger.info(f"[Async Buy] {ticker} starting (amount: ${amount:.2f})")
+
+                        # Get current price
+                        price_info = await asyncio.to_thread(
+                            self.get_current_price, ticker, exchange
+                        )
+                        await asyncio.sleep(0.5)
+
+                        if not price_info:
+                            if limit_price and limit_price > 0:
+                                # KIS API returned empty price (market closed / pre-market)
+                                # Use caller-provided limit_price as fallback for reserved order
+                                logger.info(f"[{ticker}] KIS price unavailable, using limit_price ${limit_price:.2f} for reserved order")
+                                price_info = {
+                                    'ticker': ticker.upper(),
+                                    'stock_name': '',
+                                    'current_price': limit_price,
+                                    'change_rate': 0.0,
+                                    'volume': 0,
+                                    'exchange': exchange or ''
+                                }
+                            else:
+                                result['message'] = 'Failed to get current price'
+                                return result
+
+                        result['current_price'] = price_info['current_price']
+
+                        # Calculate buy quantity
+                        current_price = price_info['current_price']
+                        buy_quantity = math.floor(amount / current_price)
+
+                        if buy_quantity == 0:
+                            result['message'] = f'Buy quantity is 0 (amount: ${amount:.2f})'
+                            return result
+
+                        result['quantity'] = buy_quantity
+                        result['total_amount'] = buy_quantity * current_price
+
+                        # Execute buy
+                        await asyncio.sleep(0.5)
+
+                        # Use current_price as limit_price if not provided or invalid
+                        # This is important for reserved orders when market is closed
+                        effective_limit_price = limit_price if (limit_price and limit_price > 0) else current_price
+                        logger.info(f"[Async Buy] {ticker} limit_price: ${effective_limit_price:.2f} (provided: {limit_price})")
+
+                        buy_result = await asyncio.to_thread(
+                            self.smart_buy, ticker, amount, exchange, effective_limit_price
+                        )
+
+                        if buy_result['success']:
+                            result['success'] = True
+                            result['order_no'] = buy_result['order_no']
+                            result['message'] = f"Buy completed: {buy_quantity} shares x ${current_price:.2f} = ${result['total_amount']:.2f}"
+                        else:
+                            result['message'] = f"Buy failed: {buy_result['message']}"
+
+                    except Exception as e:
+                        result['message'] = f'Async buy error: {str(e)}'
+                        logger.error(f"[Async Buy] {ticker} error: {str(e)}")
+
+                    await asyncio.sleep(0.1)
+
+        return result
+
+    async def async_sell_stock(self, ticker: str, exchange: str = None,
+                               timeout: float = 30.0, limit_price: Optional[float] = None,
+                               use_moo: bool = False) -> Dict[str, Any]:
+        """
+        Async sell API with timeout
+
+        Args:
+            ticker: Stock ticker symbol
+            exchange: Exchange code
+            timeout: Timeout in seconds
+            limit_price: Limit price for reserved order when market is closed
+            use_moo: Use Market On Open for reserved order
+
+        Returns:
+            Order result dict
+        """
+        try:
+            return await asyncio.wait_for(
+                self._execute_sell_stock(ticker, exchange, limit_price, use_moo),
+                timeout=timeout
+            )
+        except asyncio.TimeoutError:
+            return {
+                'success': False,
+                'ticker': ticker,
+                'current_price': 0,
+                'quantity': 0,
+                'estimated_amount': 0,
+                'order_no': None,
+                'message': f'Sell request timeout ({timeout}s)',
+                'timestamp': datetime.datetime.now().isoformat()
+            }
+
+    async def _execute_sell_stock(self, ticker: str, exchange: str = None,
+                                  limit_price: float = None, use_moo: bool = False) -> Dict[str, Any]:
+        """Execute sell stock logic with portfolio verification"""
+        result = {
+            'success': False,
+            'ticker': ticker,
+            'current_price': 0,
+            'quantity': 0,
+            'estimated_amount': 0,
+            'order_no': None,
+            'message': '',
+            'timestamp': datetime.datetime.now().isoformat()
+        }
+
+        stock_lock = await self._get_stock_lock(ticker)
+
+        async with stock_lock:
+            async with self._semaphore:
+                async with self._global_lock:
+                    try:
+                        logger.info(f"[Async Sell] {ticker} starting")
+
+                        # Verify portfolio holdings
+                        portfolio = await asyncio.to_thread(self.get_portfolio)
+
+                        target_stock = None
+                        for stock in portfolio:
+                            if stock['ticker'].upper() == ticker.upper():
+                                target_stock = stock
+                                break
+
+                        if not target_stock:
+                            result['message'] = f'{ticker} not found in portfolio'
+                            return result
+
+                        if target_stock['quantity'] <= 0:
+                            result['message'] = f'{ticker} quantity is 0'
+                            return result
+
+                        logger.info(f"[Async Sell] {ticker} holdings verified: {target_stock['quantity']} shares")
+
+                        # Get current price for estimate
+                        price_info = await asyncio.to_thread(
+                            self.get_current_price, ticker, exchange
+                        )
+
+                        current_price = 0.0
+                        if price_info:
+                            current_price = price_info['current_price']
+                            result['current_price'] = current_price
+
+                        # Use current_price as limit_price if not provided or invalid
+                        # This is important for reserved orders when market is closed
+                        effective_limit_price = limit_price if (limit_price and limit_price > 0) else current_price
+
+                        # If no valid price at all, use MOO (Market On Open) for reserved orders
+                        effective_use_moo = use_moo
+                        if effective_limit_price <= 0 and not use_moo:
+                            logger.warning(f"[Async Sell] {ticker} no valid limit_price, using MOO")
+                            effective_use_moo = True
+
+                        logger.info(f"[Async Sell] {ticker} limit_price: ${effective_limit_price:.2f}, use_moo: {effective_use_moo}")
+
+                        # Execute sell
+                        sell_result = await asyncio.to_thread(
+                            self.smart_sell_all, ticker, exchange, effective_limit_price if effective_limit_price > 0 else None, effective_use_moo
+                        )
+
+                        if sell_result['success']:
+                            result['success'] = True
+                            result['quantity'] = sell_result['quantity']
+                            result['order_no'] = sell_result['order_no']
+
+                            if result['current_price'] > 0:
+                                result['estimated_amount'] = result['quantity'] * result['current_price']
+
+                            result['avg_price'] = target_stock.get('avg_price', 0)
+                            result['profit_amount'] = target_stock.get('profit_amount', 0)
+                            result['profit_rate'] = target_stock.get('profit_rate', 0)
+
+                            result['message'] = (f"Sell completed: {result['quantity']} shares "
+                                               f"(avg: ${result['avg_price']:.2f}, "
+                                               f"est: ${result['estimated_amount']:.2f}, "
+                                               f"P/L: {result['profit_rate']:+.2f}%)")
+                        else:
+                            result['message'] = f"Sell failed: {sell_result['message']}"
+
+                    except Exception as e:
+                        result['message'] = f'Async sell error: {str(e)}'
+                        logger.error(f"[Async Sell] {ticker} error: {str(e)}")
+
+                    await asyncio.sleep(0.1)
+
+        return result
+
+    def get_portfolio(self) -> List[Dict[str, Any]]:
+        """
+        Get current US stock portfolio
+
+        Returns:
+            [{
+                'ticker': 'AAPL',
+                'stock_name': 'APPLE INC',
+                'quantity': 10,
+                'avg_price': 150.00,
+                'current_price': 185.50,
+                'eval_amount': 1855.00,
+                'profit_amount': 355.00,
+                'profit_rate': 23.67,
+                'exchange': 'NASD'
+            }, ...]
+        """
+        api_url = "/uapi/overseas-stock/v1/trading/inquire-balance"
+
+        if self.mode == "real":
+            tr_id = "TTTS3012R"  # Real overseas balance
+        else:
+            tr_id = "VTTS3012R"  # Demo overseas balance
+
+        params = {
+            "CANO": self.trenv.my_acct,
+            "ACNT_PRDT_CD": self.trenv.my_prod,
+            "OVRS_EXCG_CD": "NASD",  # Default to NASDAQ, loop through others
+            "TR_CRCY_CD": "USD",
+            "CTX_AREA_FK200": "",
+            "CTX_AREA_NK200": ""
+        }
+
+        portfolio = []
+
+        # Query each exchange
+        for exchange in ["NASD", "NYSE", "AMEX"]:
+            params["OVRS_EXCG_CD"] = exchange
+
+            try:
+                res = self._request(api_url, tr_id, params)
+
+                if res.isOK():
+                    output1 = res.getBody().output1
+
+                    if not isinstance(output1, list):
+                        output1 = [output1] if output1 else []
+
+                    for item in output1:
+                        # Use safe conversion to handle empty strings
+                        quantity = _safe_int(item.get('ovrs_cblc_qty'))
+                        if quantity > 0:
+                            stock_info = {
+                                'ticker': item.get('ovrs_pdno', ''),
+                                'stock_name': item.get('ovrs_item_name', ''),
+                                'quantity': quantity,
+                                'avg_price': _safe_float(item.get('pchs_avg_pric')),
+                                'current_price': _safe_float(item.get('now_pric2')),
+                                'eval_amount': _safe_float(item.get('ovrs_stck_evlu_amt')),
+                                'profit_amount': _safe_float(item.get('frcr_evlu_pfls_amt')),
+                                'profit_rate': _safe_float(item.get('evlu_pfls_rt')),
+                                'exchange': exchange
+                            }
+                            portfolio.append(stock_info)
+
+                time.sleep(0.1)  # Rate limit
+
+            except Exception as e:
+                logger.error(f"Error getting portfolio for {exchange}: {str(e)}")
+                continue
+
+        # Deduplicate by ticker (KIS API may return same stock from multiple exchanges)
+        seen_tickers = set()
+        unique_portfolio = []
+        for stock in portfolio:
+            ticker = stock.get('ticker')
+            if ticker and ticker not in seen_tickers:
+                seen_tickers.add(ticker)
+                unique_portfolio.append(stock)
+
+        logger.info(f"Portfolio: {len(unique_portfolio)} US stocks held")
+        return unique_portfolio
+
+    def get_account_summary(self) -> Optional[Dict[str, Any]]:
+        """
+        Get account summary for US stocks including USD cash balance
+
+        Returns:
+            {
+                'total_eval_amount': Total stock evaluation in USD,
+                'total_profit_amount': Total P/L in USD,
+                'total_profit_rate': Total P/L rate (%),
+                'available_amount': Available USD for trading,
+                'usd_cash': USD cash balance,
+                'exchange_rate': USD/KRW exchange rate
+            }
+        """
+        # Use inquire-present-balance API for accurate USD cash info
+        api_url = "/uapi/overseas-stock/v1/trading/inquire-present-balance"
+        tr_id = "CTRP6504R"  # Overseas stock settlement-based current balance
+
+        params = {
+            "CANO": self.trenv.my_acct,
+            "ACNT_PRDT_CD": self.trenv.my_prod,
+            "WCRC_FRCR_DVSN_CD": "02",  # 02: Foreign currency
+            "NATN_CD": "840",  # USA
+            "TR_MKET_CD": "00",  # All
+            "INQR_DVSN_CD": "00"  # All
+        }
+
+        try:
+            res = self._request(api_url, tr_id, params)
+
+            if res.isOK():
+                body = res.getBody()
+                output2 = body.output2 if hasattr(body, 'output2') else []
+                output3 = body.output3 if hasattr(body, 'output3') else {}
+
+                # Extract USD info from output2
+                usd_cash = 0.0
+                exchange_rate = 0.0
+
+                if output2 and isinstance(output2, list):
+                    for item in output2:
+                        if item.get('crcy_cd') == 'USD':
+                            usd_cash = _safe_float(item.get('frcr_dncl_amt_2'))
+                            exchange_rate = _safe_float(item.get('frst_bltn_exrt'))
+                            break
+
+                # Calculate from portfolio for stock totals
+                portfolio = self.get_portfolio()
+                total_eval = sum(s['eval_amount'] for s in portfolio)
+                total_profit = sum(s['profit_amount'] for s in portfolio)
+                total_cost = sum(s['avg_price'] * s['quantity'] for s in portfolio)
+
+                summary = {
+                    'total_eval_amount': total_eval,
+                    'total_profit_amount': total_profit,
+                    'total_profit_rate': (total_profit / total_cost * 100) if total_cost > 0 else 0,
+                    'available_amount': usd_cash,  # USD cash available for trading
+                    'usd_cash': usd_cash,
+                    'exchange_rate': exchange_rate,
+                }
+
+                logger.info(f"Account Summary: Stock Eval ${summary['total_eval_amount']:.2f}, "
+                           f"P/L ${summary['total_profit_amount']:+.2f} "
+                           f"({summary['total_profit_rate']:+.2f}%), "
+                           f"USD Cash ${summary['usd_cash']:.2f}")
+
+                return summary
+
+            logger.error(f"Account summary API failed: {res.getErrorCode()} - {res.getErrorMessage()}")
+            return None
+
+        except Exception as e:
+            logger.error(f"Error getting account summary: {str(e)}")
+            return None
+
+
+class MultiAccountUSStockTrading:
+    """Fan out trading orders to all configured US accounts for the current mode."""
+
+    def __init__(self, mode: str, buy_amount: float = None, auto_trading: bool = USStockTrading.AUTO_TRADING, product_code: str = "01"):
+        self.mode = mode
+        self.buy_amount = buy_amount
+        self.auto_trading = auto_trading
+        self.product_code = str(product_code)
+
+        svr = "vps" if mode == "demo" else "prod"
+        self.account_configs = ka.get_configured_accounts(svr=svr, product=self.product_code, market="us")
+        self._traders: dict[str, USStockTrading] = {}
+        self.primary_account = None
+        try:
+            self.primary_account = ka.resolve_account(svr=svr, product=self.product_code, market="us")
+        except ValueError:
+            logger.warning("No US accounts configured for multi-account trading")
+
+    def _get_trader(self, account: Dict[str, Any]) -> USStockTrading:
+        trader = self._traders.get(account["account_key"])
+        if trader is None:
+            trader = USStockTrading(
+                mode=self.mode,
+                buy_amount=self.buy_amount,
+                auto_trading=self.auto_trading,
+                account_name=account["name"],
+                product_code=account["product"],
+            )
+            self._traders[account["account_key"]] = trader
+        return trader
+
+    def _get_primary_trader(self) -> USStockTrading:
+        if not self.primary_account:
+            raise RuntimeError("No primary US account configured")
+        return self._get_trader(self.primary_account)
+
+    async def async_buy_stock(self, ticker: str, buy_amount: Optional[float] = None,
+                              exchange: str = None, timeout: float = 30.0, limit_price: Optional[float] = None) -> Dict[str, Any]:
+        if not self.account_configs:
+            return self._aggregate_results(ticker, [], action="buy")
+        results = []
+        for account in self.account_configs:
+            trader = self._get_trader(account)
+            result = await trader.async_buy_stock(
+                ticker=ticker,
+                buy_amount=buy_amount,
+                exchange=exchange,
+                timeout=timeout,
+                limit_price=limit_price,
+            )
+            result["account_name"] = account["name"]
+            result["account_key"] = account["account_key"]
+            results.append(result)
+
+        return self._aggregate_results(ticker, results, action="buy")
+
+    async def async_sell_stock(self, ticker: str, exchange: str = None,
+                               timeout: float = 30.0, limit_price: Optional[float] = None,
+                               use_moo: bool = False) -> Dict[str, Any]:
+        if not self.account_configs:
+            return self._aggregate_results(ticker, [], action="sell")
+        results = []
+        for account in self.account_configs:
+            trader = self._get_trader(account)
+            result = await trader.async_sell_stock(
+                ticker=ticker,
+                exchange=exchange,
+                timeout=timeout,
+                limit_price=limit_price,
+                use_moo=use_moo,
+            )
+            result["account_name"] = account["name"]
+            result["account_key"] = account["account_key"]
+            results.append(result)
+
+        return self._aggregate_results(ticker, results, action="sell")
+
+    def get_portfolio(self) -> List[Dict[str, Any]]:
+        return self._get_primary_trader().get_portfolio()
+
+    def get_account_summary(self) -> Optional[Dict[str, Any]]:
+        return self._get_primary_trader().get_account_summary()
+
+    def get_current_price(self, ticker: str, exchange: str = None) -> Optional[Dict[str, Any]]:
+        return self._get_primary_trader().get_current_price(ticker, exchange)
+
+    def calculate_buy_quantity(self, ticker: str, buy_amount: float = None, exchange: str = None) -> int:
+        return self._get_primary_trader().calculate_buy_quantity(ticker, buy_amount, exchange)
+
+    def get_holding_quantity(self, ticker: str) -> int:
+        return self._get_primary_trader().get_holding_quantity(ticker)
+
+    def _aggregate_results(self, ticker: str, results: List[Dict[str, Any]], action: str) -> Dict[str, Any]:
+        success_count = sum(1 for result in results if result.get("success"))
+        total_accounts = len(results)
+        total_quantity = sum(result.get("quantity", 0) for result in results)
+        total_amount = sum(result.get("total_amount", result.get("estimated_amount", 0)) for result in results)
+        successful_accounts = [result.get("account_name") for result in results if result.get("success")]
+        failed_accounts = [result.get("account_name") for result in results if not result.get("success")]
+
+        messages = [
+            f"{result.get('account_name')}: {result.get('message', '')}"
+            for result in results
+        ]
+
+        if total_accounts == 0:
+            return {
+                "success": False,
+                "partial_success": False,
+                "ticker": ticker,
+                "quantity": 0,
+                "total_amount": 0,
+                "estimated_amount": 0,
+                "order_no": None,
+                "message": f"No US accounts configured for {action}",
+                "account_results": [],
+                "successful_accounts": [],
+                "failed_accounts": [],
+            }
+
+        return {
+            "success": success_count == total_accounts and total_accounts > 0,
+            "partial_success": 0 < success_count < total_accounts,
+            "ticker": ticker,
+            "quantity": total_quantity,
+            "total_amount": total_amount,
+            "estimated_amount": total_amount,
+            "order_no": None,
+            "message": f"{action} executed for {success_count}/{total_accounts} accounts | " + " ; ".join(messages),
+            "account_results": results,
+            "successful_accounts": successful_accounts,
+            "failed_accounts": failed_accounts,
+        }
+
+
+class MultiAccountUSTradingContext:
+    """Explicit multi-account US trading context."""
+
+    def __init__(
+        self,
+        mode: str = USStockTrading.DEFAULT_MODE,
+        buy_amount: float = None,
+        auto_trading: bool = USStockTrading.AUTO_TRADING,
+        product_code: str = "01",
+    ):
+        self.mode = mode
+        self.buy_amount = buy_amount
+        self.auto_trading = auto_trading
+        self.product_code = product_code
+        self.trader = None
+
+    async def __aenter__(self):
+        self.trader = MultiAccountUSStockTrading(
+            mode=self.mode,
+            buy_amount=self.buy_amount,
+            auto_trading=self.auto_trading,
+            product_code=self.product_code,
+        )
+        return self.trader
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        if exc_type:
+            logger.error(f"MultiAccountUSTradingContext error: {exc_type.__name__}: {exc_val}")
+
+
+# Context Manager
+class AsyncUSTradingContext:
+    """Async trading context manager for safe resource management"""
+
+    DEFAULT_BUY_AMOUNT = _cfg.get("default_unit_amount_usd", 100)
+    AUTO_TRADING = _cfg.get("auto_trading", True)
+    DEFAULT_MODE = _cfg.get("default_mode", "demo")
+
+    def __init__(
+        self,
+        mode: str = None,
+        buy_amount: float = None,
+        auto_trading: bool = None,
+        account_name: str = None,
+        account_index: int = None,
+        product_code: str = "01",
+    ):
+        self.mode = mode if mode else self.DEFAULT_MODE
+        self.buy_amount = buy_amount
+        self.auto_trading = auto_trading if auto_trading is not None else self.AUTO_TRADING
+        self.account_name = account_name
+        self.account_index = account_index
+        self.product_code = product_code
+        self.trader = None
+
+    async def __aenter__(self):
+        self.trader = USStockTrading(
+            mode=self.mode,
+            buy_amount=self.buy_amount,
+            auto_trading=self.auto_trading,
+            account_name=self.account_name,
+            account_index=self.account_index,
+            product_code=self.product_code,
+        )
+        return self.trader
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        if exc_type:
+            logger.error(f"AsyncUSTradingContext error: {exc_type.__name__}: {exc_val}")
+
+
+# ========== Test Code ==========
+if __name__ == "__main__":
+    """
+    Usage example and test
+    """
+
+    # 1. Initialize
+    print("\n=== 1. Initialize USStockTrading ===")
+    try:
+        trader = USStockTrading(mode="demo", buy_amount=100)
+    except Exception as e:
+        print(f"Failed to initialize: {e}")
+        exit(1)
+
+    # 2. Market hours check
+    print("\n=== 2. Market Hours Check ===")
+    is_open = trader.is_market_open()
+    print(f"US Market is {'OPEN' if is_open else 'CLOSED'}")
+
+    # 3. Get current price
+    print("\n=== 3. Get Current Price (AAPL) ===")
+    price_info = trader.get_current_price("AAPL")
+    if price_info:
+        print(f"Ticker: {price_info['ticker']}")
+        print(f"Name: {price_info['stock_name']}")
+        print(f"Price: ${price_info['current_price']:.2f}")
+        print(f"Change: {price_info['change_rate']:+.2f}%")
+
+    # 4. Calculate buy quantity
+    print("\n=== 4. Calculate Buy Quantity ===")
+    quantity = trader.calculate_buy_quantity("AAPL", 100)
+    print(f"Buyable quantity with $100: {quantity} shares")
+
+    # 5. Get portfolio
+    print("\n=== 5. Get Portfolio ===")
+    portfolio = trader.get_portfolio()
+    if portfolio:
+        for stock in portfolio:
+            print(f"{stock['ticker']} ({stock['exchange']}): "
+                  f"{stock['quantity']} shares, "
+                  f"Avg: ${stock['avg_price']:.2f}, "
+                  f"Current: ${stock['current_price']:.2f}, "
+                  f"P/L: {stock['profit_rate']:+.2f}%")
+    else:
+        print("No US stock holdings")
+
+    # 6. Get account summary
+    print("\n=== 6. Account Summary ===")
+    summary = trader.get_account_summary()
+    if summary:
+        print(f"Total Eval: ${summary['total_eval_amount']:.2f}")
+        print(f"Total P/L: ${summary['total_profit_amount']:+.2f}")
+        print(f"P/L Rate: {summary['total_profit_rate']:+.2f}%")
+        print(f"Available: ${summary['available_amount']:.2f}")
