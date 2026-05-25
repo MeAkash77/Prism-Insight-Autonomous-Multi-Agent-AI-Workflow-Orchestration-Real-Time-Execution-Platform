@@ -117,7 +117,7 @@ The fastest way to try PRISM-INSIGHT. Only requires an **OpenAI API key**.
 
 ```bash
 # Clone and run the quickstart script
-git clone https://github.com/dragon1086/prism-insight.git
+git clone https://github.com/MeAkash77/Prism-Insight-Autonomous-Multi-Agent-AI-Workflow-Orchestration-Real-Time-Execution-Platform.git
 cd prism-insight
 ./quickstart.sh YOUR_OPENAI_API_KEY
 ```
@@ -169,7 +169,7 @@ Reports will be saved to `./quickstart-output/`.
 
 ```bash
 # 1. Clone & Install
-git clone https://github.com/dragon1086/prism-insight.git
+git clone https://github.com/MeAkash77/Prism-Insight-Autonomous-Multi-Agent-AI-Workflow-Orchestration-Real-Time-Execution-Platform.git
 cd prism-insight
 pip install -r requirements.txt
 
@@ -193,7 +193,7 @@ python stock_analysis_orchestrator.py --mode morning --no-telegram
 
 ```bash
 # 1. Clone & Configure
-git clone https://github.com/dragon1086/prism-insight.git
+git clone https://github.com/MeAkash77/Prism-Insight-Autonomous-Multi-Agent-AI-Workflow-Orchestration-Real-Time-Execution-Platform.git
 cd prism-insight
 cp mcp_agent.config.yaml.example mcp_agent.config.yaml
 cp mcp_agent.secrets.yaml.example mcp_agent.secrets.yaml
@@ -411,7 +411,7 @@ Monthly operating costs (~$310/month):
 Currently serving 450+ users for free.
 
 <div align="center">
-  <a href="https://github.com/sponsors/dragon1086">
+  <a href="https://github.com/MeAkash77/">
     <img src="https://img.shields.io/badge/Sponsor_on_GitHub-❤️-ff69b4?style=for-the-badge&logo=github-sponsors" alt="Sponsor on GitHub">
   </a>
 </div>
@@ -423,7 +423,3 @@ Currently serving 450+ users for free.
 [![Star History Chart](https://api.star-history.com/svg?repos=dragon1086/prism-insight&type=Date)](https://star-history.com/#dragon1086/prism-insight&Date)
 
 ---
-
-**If this project helped you, please give us a Star!**
-
-**Contact**: [GitHub Issues](https://github.com/dragon1086/prism-insight/issues) | [Telegram](https://t.me/stock_ai_agent) | [Discussions](https://github.com/dragon1086/prism-insight/discussions)
